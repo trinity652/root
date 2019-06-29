@@ -11,6 +11,11 @@ ROOT_ADD_GTEST(TestRandomGenerator
                TestRandomGenerator.cxx
                LIBRARIES ${Libraries})
 
+if(dataframe)
+    ROOT_ADD_GTEST(rtensor rtensor.cxx LIBRARIES ROOTVecOps TMVA)
+    ROOT_ADD_GTEST(rtensor-utils rtensor_utils.cxx LIBRARIES ROOTVecOps TMVA ROOTDataFrame)
+endif()
+
 project(tmva-tests)
 find_package(ROOT REQUIRED)
 

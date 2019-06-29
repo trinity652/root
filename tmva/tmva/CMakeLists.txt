@@ -13,6 +13,18 @@ else()
   set(installoptions ${installoptions} FILTER "Cuda")
 endif()
 
+# Enable parts dependent RDataFrame
+if(dataframe)
+    set(TMVA_EXTRA_HEADERS
+        TMVA/RTensor.hxx
+        TMVA/RTensorUtils.hxx
+    )
+    set(TMVA_EXTRA_DEPENDENCIES
+        ROOTDataFrame
+        ROOTVecOps
+    )
+endif()
+
 ROOT_STANDARD_LIBRARY_PACKAGE(TMVA
   HEADERS
     TMVA/BDTEventWrapper.h
@@ -178,6 +190,7 @@ ROOT_STANDARD_LIBRARY_PACKAGE(TMVA
     TMVA/VarTransformHandler.h
     TMVA/Version.h
     TMVA/Volume.h
+    ${TMVA_EXTRA_HEADERS}
   SOURCES
     src/BDTEventWrapper.cxx
     src/BinarySearchTree.cxx
@@ -349,9 +362,6 @@ ROOT_STANDARD_LIBRARY_PACKAGE(TMVA
     #src/DNN/Architectures/Reference/Propagation.cxx
     #src/DNN/Architectures/Reference/RecurrentPropagation.cxx
     #src/DNN/Architectures/Reference/Regularization.cxx
-  DICTIONARY_OPTIONS
-    -writeEmptyRootPCM
-    ${dictoptions}
   DEPENDENCIES
     TreePlayer
     Tree
@@ -364,6 +374,10 @@ ROOT_STANDARD_LIBRARY_PACKAGE(TMVA
     Imt
     RIO
     XMLIO
+    ${TMVA_EXTRA_DEPENDENCIES}
+  DICTIONARY_OPTIONS
+    -writeEmptyRootPCM
+    ${dictoptions}
   INSTALL_OPTIONS
     ${installoptions}
 )

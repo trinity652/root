@@ -282,7 +282,34 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
       if(IS_ABSOLUTE ${fp})
         set(headerFile ${fp})
       else()
-        find_file(headerFile ${fp} HINTS ${incdirs} NO_DEFAULT_PATH NO_SYSTEM_ENVIRONMENT_PATH)
+        set(incdirs_in_build)
+        set(incdirs_in_prefix)
+        foreach(incdir ${incdirs})
+          if(NOT IS_ABSOLUTE incdir
+             OR incdir MATCHES "^${CMAKE_SOURCE_DIR}"
+             OR incdir MATCHES "^${CMAKE_CURRENT_BUILD_DIR}"
+             OR incdir MATCHES "^${CMAKE_BUILD_DIR}")
+            list(APPEND incdirs_in_build
+                 ${incdir})
+          else()
+            list(APPEND incdirs_in_prefix
+                 ${incdir})
+          endif()
+        endforeach()
+        if(incdirs_in_build)
+          find_file(headerFile ${fp}
+            HINTS ${incdirs_in_build}
+            NO_DEFAULT_PATH
+            NO_SYSTEM_ENVIRONMENT_PATH
+            NO_CMAKE_FIND_ROOT_PATH)
+        endif()
+        # Try this even if NOT incdirs_in_prefix: might not need a HINT.
+        if(NOT headerFile)
+          find_file(headerFile ${fp}
+            HINTS ${incdirs_in_prefix}
+            NO_DEFAULT_PATH
+            NO_SYSTEM_ENVIRONMENT_PATH)
+        endif()
       endif()
       if(NOT headerFile)
         message(FATAL_ERROR "Cannot find header ${fp} to generate dictionary ${dictionary} for. Did you forget to set the INCLUDE_DIRECTORIES property for the current directory?")
@@ -358,24 +385,30 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
   #---Set the library output directory-----------------------
   ROOT_GET_LIBRARY_OUTPUT_DIR(library_output_dir)
   if(ARG_MODULE)
+    set(cpp_module)
     set(library_name ${libprefix}${ARG_MODULE}${libsuffix})
+    set(newargs -s ${library_output_dir}/${library_name})
+    set(master_pcm_name ${library_output_dir}/${libprefix}${ARG_MODULE}_rdict.pcm)
     if(ARG_MULTIDICT)
-      set(newargs -s ${library_output_dir}/${library_name} -multiDict)
+      set(newargs ${newargs} -multiDict)
       set(pcm_name ${library_output_dir}/${libprefix}${ARG_MODULE}_${dictionary}_rdict.pcm)
       set(rootmap_name ${library_output_dir}/${libprefix}${deduced_arg_module}.rootmap)
     else()
-      set(newargs -s ${library_output_dir}/${library_name})
-      set(pcm_name ${library_output_dir}/${libprefix}${ARG_MODULE}_rdict.pcm)
-      set(rootmap_name ${library_output_dir}/${libprefix}${ARG_MODULE}.rootmap)
       set(cpp_module ${ARG_MODULE})
-      if(runtime_cxxmodules)
+      set(pcm_name ${master_pcm_name})
+      set(rootmap_name ${library_output_dir}/${libprefix}${ARG_MODULE}.rootmap)
+    endif(ARG_MULTIDICT)
+
+    if(runtime_cxxmodules)
+      set(pcm_name)
+      if(cpp_module)
         set(cpp_module_file ${library_output_dir}/${cpp_module}.pcm)
         if (APPLE)
           if (${cpp_module} MATCHES "(GCocoa|GQuartz)")
             set(cpp_module_file)
           endif()
         endif(APPLE)
-      endif()
+      endif(cpp_module)
     endif()
   else()
     set(library_name ${libprefix}${deduced_arg_module}${libsuffix})
@@ -444,6 +477,14 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
 
   #---roottest compability
   add_custom_target(${dictname} DEPENDS ${dictionary}.cxx ${pcm_name} ${rootmap_name} ${cpp_module_file})
+
+  if (runtime_cxxmodules AND ARG_MULTIDICT)
+    set (main_pcm_target "G__${ARG_MODULE}")
+    if (NOT TARGET ${main_pcm_target})
+      message(FATAL_ERROR "Target ${main_pcm_target} not found! Please move ${main_pcm_target} before specifying MULTIDICT.")
+    endif()
+    add_dependencies(${main_pcm_target} ${dictname})
+  endif()
 
   if(NOT ARG_NOINSTALL AND NOT CMAKE_ROOTTEST_DICT AND DEFINED CMAKE_LIBRARY_OUTPUT_DIRECTORY)
     set_property(GLOBAL APPEND PROPERTY ROOT_DICTIONARY_TARGETS ${dictname})
@@ -653,11 +694,7 @@ function(ROOT_LINKER_LIBRARY library)
     if(ARG_TYPE STREQUAL SHARED)
       set_target_properties(${library} PROPERTIES  ${ROOT_LIBRARY_PROPERTIES} )
     endif()
-    if(CMAKE_PROJECT_NAME STREQUAL ROOT AND NOT explicitlink)
-      target_link_libraries(${library} PUBLIC ${ARG_LIBRARIES})
-    else()
-      target_link_libraries(${library} PUBLIC ${ARG_LIBRARIES} ${ARG_DEPENDENCIES})
-    endif()
+    target_link_libraries(${library} PUBLIC ${ARG_LIBRARIES} ${ARG_DEPENDENCIES})
   endif()
 
   if(DEFINED CMAKE_CXX_STANDARD)
@@ -1267,6 +1304,8 @@ function(ROOT_ADD_TEST test)
       set_property(TEST ${test} PROPERTY ENVIRONMENT ROOTIGNOREPREFIX=1)
     endif()
   endif()
+
+  set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT ROOT_HIST=0)
 
   #- Handle TIMOUT and DEPENDS arguments
   if(ARG_TIMEOUT)
