@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT tmva package
 # @author Pere Mato, CERN
@@ -18,6 +24,9 @@ if(dataframe)
     set(TMVA_EXTRA_HEADERS
         TMVA/RTensor.hxx
         TMVA/RTensorUtils.hxx
+        TMVA/RStandardScaler.hxx
+        TMVA/RReader.hxx
+        TMVA/RInferenceUtils.hxx
     )
     set(TMVA_EXTRA_DEPENDENCIES
         ROOTDataFrame

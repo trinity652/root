@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT graf3d/eve package
 ############################################################################
@@ -210,17 +216,39 @@ set(EVE_SOURCES
 )
 
 if(MSVC)
-  include_directories(BEFORE "inc")
+  ROOT_LINKER_LIBRARY(Eve
+    ${EVE_SOURCES}
+    LIBRARIES
+      OpenGL::GL
+      OpenGL::GLU
+      ${FTGL_LIBRARIES}
+      ${GLEW_LIBRARIES}
+    DEPENDENCIES
+      Core
+      EG
+      Ged
+      Geom
+      RGL
+      Physics
+  )
 
   ROOT_GENERATE_DICTIONARY(G__Eve1
     ${EVE_HEADERS1}
+    NOTARGET
     LINKDEF
       LinkDef1.h
+    MODULE
+      Eve
   )
+
   ROOT_GENERATE_DICTIONARY(G__Eve2
     ${EVE_HEADERS2}
+    NOTARGET
     LINKDEF
       LinkDef2.h
+    MODULE
+      Eve
+    MULTIDICT
   )
 
   ROOT_GENERATE_ROOTMAP(Eve
@@ -243,24 +271,6 @@ if(MSVC)
       Rint
       Tree
       TreePlayer
-  )
-
-  ROOT_LINKER_LIBRARY(Eve
-    ${EVE_SOURCES}
-    G__Eve1.cxx
-    G__Eve2.cxx
-    LIBRARIES
-      OpenGL::GL
-      OpenGL::GLU
-      ${FTGL_LIBRARIES}
-      ${GLEW_LIBRARIES}
-    DEPENDENCIES
-      Core
-      EG
-      Ged
-      Geom
-      RGL
-      Physics
   )
 
   ROOT_INSTALL_HEADERS()
@@ -289,3 +299,6 @@ else()
       Physics
   )
 endif()
+
+target_include_directories(Eve PRIVATE
+  ${FTGL_INCLUDE_DIRS} ${GLEW_INCLUDE_DIRS})

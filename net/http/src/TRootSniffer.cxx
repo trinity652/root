@@ -11,24 +11,19 @@
 
 #include "TRootSniffer.h"
 
-#include "TFile.h"
+#include "TDirectoryFile.h"
 #include "TKey.h"
 #include "TList.h"
-#include "TStreamerInfo.h"
-#include "TBufferFile.h"
 #include "TBufferJSON.h"
 #include "TROOT.h"
-#include "TTimer.h"
 #include "TFolder.h"
 #include "TClass.h"
 #include "TRealData.h"
 #include "TDataMember.h"
 #include "TDataType.h"
-#include "TBaseClass.h"
 #include "TObjString.h"
 #include "TUrl.h"
 #include "TImage.h"
-#include "RZip.h"
 #include "RVersion.h"
 #include "TVirtualMutex.h"
 #include "TRootSnifferStore.h"
@@ -765,7 +760,7 @@ void TRootSniffer::ScanObjectChilds(TRootSnifferScanRec &rec, TObject *obj)
       ScanCollection(rec, ((TFolder *)obj)->GetListOfFolders());
    } else if (obj->InheritsFrom(TDirectory::Class())) {
       TDirectory *dir = (TDirectory *)obj;
-      ScanCollection(rec, dir->GetList(), 0, dir->GetListOfKeys());
+      ScanCollection(rec, dir->GetList(), nullptr, dir->GetListOfKeys());
    }
    if (rec.CanExpandItem()) {
       ScanObjectMembers(rec, obj->IsA(), (char *)obj);
@@ -1851,7 +1846,7 @@ Bool_t TRootSniffer::RegisterCommand(const char *cmdname, const char *method, co
    Int_t numargs = 0;
    do {
       TString nextname = TString::Format("%sarg%d%s", "%", numargs + 1, "%");
-      if (strstr(method, nextname.Data()) == 0)
+      if (strstr(method, nextname.Data()) == nullptr)
          break;
       numargs++;
    } while (numargs < 100);

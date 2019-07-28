@@ -176,6 +176,7 @@ RooCmdArg SelectVars(const RooArgSet& vars) ;
 RooCmdArg EventRange(Int_t nStart, Int_t nStop) ;
 
 // RooAbsPdf::fitTo arguments
+RooCmdArg PrefitDataFraction(Double_t data_ratio = 0.0) ;
 RooCmdArg FitOptions(const char* opts) ;
 RooCmdArg Optimize(Int_t flag=2) ;
 RooCmdArg ProjectedObservables(const RooArgSet& set) ; // obsolete, for backward compatibility
@@ -195,7 +196,7 @@ RooCmdArg SumCoefRange(const char* rangeName) ;
 RooCmdArg Constrain(const RooArgSet& params) ;
 RooCmdArg GlobalObservables(const RooArgSet& globs) ;
 RooCmdArg GlobalObservablesTag(const char* tagName) ;
-RooCmdArg Constrained() ;
+//RooCmdArg Constrained() ;
 RooCmdArg ExternalConstraints(const RooArgSet& constraintPdfs) ;
 RooCmdArg PrintEvalErrors(Int_t numErrors) ;
 RooCmdArg EvalErrorWall(Bool_t flag) ;

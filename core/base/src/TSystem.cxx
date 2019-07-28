@@ -2,7 +2,7 @@
 // Author: Fons Rademakers   15/09/95
 
 /*************************************************************************
- * Copyright (C) 1995-2000, Rene Brun and Fons Rademakers.               *
+ * Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.               *
  * All rights reserved.                                                  *
  *                                                                       *
  * For the licensing terms see $ROOTSYS/LICENSE.                         *
@@ -21,14 +21,7 @@ that the method should be overridden in a derived class), which
 allows a simple partial implementation for new OS'es.
 */
 
-#ifdef WIN32
-#include <io.h>
-#endif
-#include <stdlib.h>
-#include <errno.h>
-#include <algorithm>
-#include <sys/stat.h>
-
+#include <ROOT/FoundationUtils.hxx>
 #include "Riostream.h"
 #include "TSystem.h"
 #include "TApplication.h"
@@ -53,6 +46,14 @@ allows a simple partial implementation for new OS'es.
 #include "compiledata.h"
 #include "RConfigure.h"
 #include "THashList.h"
+
+#include <sstream>
+#include <string>
+#include <sys/stat.h>
+
+#ifdef WIN32
+#include <io.h>
+#endif
 
 const char *gRootDir;
 const char *gProgName;
@@ -3352,6 +3353,36 @@ int TSystem::CompileMacro(const char *filename, Option_t *opt,
       linkDepLibraries = linkLibs & 0x1;
    }
 
+   // FIXME: Triggers clang false positive warning -Wunused-lambda-capture.
+   /*constexpr const*/ bool useCxxModules =
+#ifdef R__USE_CXXMODULES
+    true;
+#else
+    false;
+#endif
+
+   auto LoadLibrary = [useCxxModules, produceRootmap](const TString& lib) {
+      // We have no rootmap files or modules to construct `-l` flags enabling
+      // explicit linking. We have to resolve the dependencies by ourselves
+      // taking the job of the dyld.
+      // FIXME: This is a rare case where we have rootcling running with
+      // modules disabled. Remove this code once we fully switch to modules,
+      // or implement a special flag in rootcling which selective enables
+      // modules for dependent libraries and does not produce a module for
+      // the ACLiC library.
+      if (useCxxModules && !produceRootmap) {
+         using namespace std;
+         string deps = gInterpreter->GetSharedLibDeps(lib, /*tryDyld*/true);
+         istringstream iss(deps);
+         vector<string> libs {istream_iterator<std::string>{iss}, istream_iterator<string>{}};
+         // Skip the first element: it is a relative path to `lib`.
+         for (auto I = libs.begin() + 1, E = libs.end(); I != E; ++I)
+            if (gInterpreter->Load(I->c_str(), /*system*/false) < 0)
+               return false; // failure
+      }
+      return !gSystem->Load(lib);
+   };
+
    if (!recompile) {
       // The library already exist, let's just load it.
       if (loadLib) {
@@ -3366,7 +3397,7 @@ int TSystem::CompileMacro(const char *filename, Option_t *opt,
             gInterpreter->LoadLibraryMap(libmapfilename);
          }
 
-         return !gSystem->Load(library);
+         return LoadLibrary(library);
       }
       else return kTRUE;
    }
@@ -3477,9 +3508,11 @@ int TSystem::CompileMacro(const char *filename, Option_t *opt,
    TString mapfileout = mapfile + ".out";
 
    Bool_t needLoadMap = kFALSE;
-   if (gInterpreter->GetSharedLibDeps(libname) !=0 ) {
-       gInterpreter->UnloadLibraryMap(libname);
-      needLoadMap = kTRUE;
+   if (!useCxxModules) {
+      if (gInterpreter->GetSharedLibDeps(libname) !=0 ) {
+         gInterpreter->UnloadLibraryMap(libname);
+         needLoadMap = kTRUE;
+      }
    }
 
    std::ofstream mapfileStream( mapfilein, std::ios::out );
@@ -3510,11 +3543,6 @@ int TSystem::CompileMacro(const char *filename, Option_t *opt,
    }
    mapfileStream.close();
 
-   bool useCxxModules = false;
-#ifdef R__USE_CXXMODULES
-   useCxxModules = true;
-#endif
-
    // ======= Generate the rootcling command line
    TString rcling = "rootcling";
    PrependPathName(TROOT::GetBinDir(), rcling);
@@ -3523,21 +3551,45 @@ int TSystem::CompileMacro(const char *filename, Option_t *opt,
    rcling += "\" -f \"";
    rcling.Append(dict).Append("\" ");
 
-   if (useCxxModules)
-      rcling += " -cxxmodule ";
-
-   if (produceRootmap) {
+   if (produceRootmap && !useCxxModules) {
       rcling += " -rml " + libname + " -rmf \"" + libmapfilename + "\" ";
-   }
-   rcling.Append(GetIncludePath()).Append(" -D__ACLIC__ ");
-   if (produceRootmap) {
       rcling.Append("-DR__ACLIC_ROOTMAP ");
    }
+   rcling.Append(GetIncludePath()).Append(" -D__ACLIC__ ");
    if (gEnv) {
       TString fromConfig = gEnv->GetValue("ACLiC.IncludePaths","");
-      rcling.Append(fromConfig).Append(" \"");
+      rcling.Append(fromConfig);
    }
-   rcling.Append(filename_fullpath).Append("\" \"").Append(linkdef).Append("\"");;
+
+   // Create a modulemap
+   // FIXME: Merge the modulemap generation from cmake and here in rootcling.
+   if (useCxxModules && produceRootmap) {
+      rcling += " -cxxmodule ";
+      // TString moduleMapFileName = file_dirname + "/" + libname + ".modulemap";
+      TString moduleName = libname + "_ACLiC_dict";
+      if (moduleName.BeginsWith("lib"))
+          moduleName = moduleName.Remove(0, 3);
+      TString moduleMapName = moduleName + ".modulemap";
+      TString moduleMapFullPath = build_loc + "/" + moduleMapName;
+      // A modulemap may exist from previous runs, overwrite it.
+      if (verboseLevel > 3 && !AccessPathName(moduleMapFullPath))
+         ::Info("ACLiC", "File %s already exists!", moduleMapFullPath.Data());
+
+      std::string curDir = ROOT::FoundationUtils::GetCurrentDir();
+      std::string relative_path = ROOT::FoundationUtils::MakePathRelative(filename_fullpath.Data(), curDir);
+      std::ofstream moduleMapFile(moduleMapFullPath, std::ios::out);
+      moduleMapFile << "module \"" << moduleName << "\" {" << std::endl;
+      moduleMapFile << "  header \"" << relative_path << "\"" << std::endl;
+      moduleMapFile << "  export *" << std::endl;
+      moduleMapFile << "  link \"" << libname_ext << "\"" << std::endl;
+      moduleMapFile << "}" << std::endl;
+      moduleMapFile.close();
+      gInterpreter->RegisterPrebuiltModulePath(build_loc.Data(), moduleMapName.Data());
+      rcling.Append(" \"-fmodule-map-file=" + moduleMapFullPath + "\" ");
+   }
+
+   rcling.Append(" \"").Append(filename_fullpath).Append("\" ");
+   rcling.Append("\"").Append(linkdef).Append("\"");
 
    // ======= Run rootcling
    if (withInfo) {
@@ -3745,8 +3797,10 @@ int TSystem::CompileMacro(const char *filename, Option_t *opt,
           gInterpreter->LoadLibraryMap(libmapfilename);
       }
       if (verboseLevel>3 && withInfo)  ::Info("ACLiC","loading the shared library");
-      if (loadLib) result = !gSystem->Load(library);
-      else result = kTRUE;
+      if (loadLib)
+         result = LoadLibrary(library);
+      else
+         result = kTRUE;
 
       if ( !result ) {
          if (verboseLevel>3 && withInfo) {

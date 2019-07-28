@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 # CMakeLists.txt for the ROOT tutorials programs.
 # Author: Pere Mato, 25/10/2010
 cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
@@ -20,7 +26,7 @@ else()                       # testing using an installation
   include(${ROOT_USE_FILE})
   if(DEFINED ROOT_CONFIG_EXECUTABLE) #---If ROOT was built with the classic configure/make---
     set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules)
-    include(RootNewMacros)
+    include(RootMacros)
     set(ROOT_root_CMD root.exe)
   endif()
   enable_testing()
@@ -191,7 +197,8 @@ set(gui_veto fit/fitpanel_playback.C
              graphics/graph_edit_playback.C
              roostats/ModelInspector.C
              tree/tvdemo.C
-             eve/*.C)
+             eve/*.C
+             webgui/panel/server.cxx webgui/webwindow/server.cxx)
 
 if (NOT ROOT_tmva_FOUND)
   list(APPEND tmva_veto tmva/*.C tmva/*.py tmva/envelope/*.C tmva/keras/*.C tmva/keras/*.py)
@@ -476,19 +483,14 @@ if(ROOT_python_FOUND)
                  tutorial-dataframe-df016_vecOps-py
                  tutorial-dataframe-df017_vecOpsHEP-py
                  tutorial-dataframe-df102_NanoAODDimuonAnalysis-py
-                 tutorial-math-Legendre-py
                  tutorial-pyroot-benchmarks-py
-                 tutorial-pyroot-geometry-py
-                 tutorial-pyroot-na49view-py
                  tutorial-pyroot-pyroot002_TTreeAsMatrix-py
                  tutorial-pyroot-shapes-py
                  tutorial-pyroot-staff-py
                  tutorial-roofit-rf106_plotdecoration-py
                  tutorial-roofit-rf315_projectpdf-py
                  tutorial-roofit-rf402_datahandling-py
-                 tutorial-roofit-rf610_visualerror-py
-                 tutorial-vecops-vo004_SortAndSelect-py
-                 tutorial-vecops-vo005_Combinations-py)
+                 tutorial-roofit-rf610_visualerror-py)
 
   if(${PYTHON_VERSION_MAJOR} GREATER_EQUAL 3)
     # These tests only fail in Py3 with PyROOT experimental

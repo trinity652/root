@@ -53,7 +53,9 @@ public:
   RooDataHist& operator=(const RooDataHist&) = delete;
 
   RooDataHist(const RooDataHist& other, const char* newname = 0) ;
-  virtual TObject* Clone(const char* newname=0) const { return new RooDataHist(*this,newname?newname:GetName()) ; }
+  virtual TObject* Clone(const char* newname) const {
+    return new RooDataHist(*this, newname && newname[0] != '\0' ? newname : GetName());
+  }
   virtual ~RooDataHist() ;
 
   virtual RooAbsData* emptyClone(const char* newName=0, const char* newTitle=0, const RooArgSet*vars=0, const char* /*wgtVarName*/=0) const {
@@ -158,17 +160,17 @@ protected:
 
   virtual RooAbsData* cacheClone(const RooAbsArg* newCacheOwner, const RooArgSet* newCacheVars, const char* newName=0) ;
 
-  virtual Double_t get_wgt(const Int_t &idx) const { return _wgt[idx]; }
-  virtual Double_t get_errLo(const Int_t &idx) const { return _errLo[idx]; }
-  virtual Double_t get_errHi(const Int_t &idx) const { return _errHi[idx]; }
-  virtual Double_t get_sumw2(const Int_t &idx) const { return _sumw2[idx]; }
+  Double_t get_wgt(const Int_t &idx) const { return _wgt[idx]; }
+  Double_t get_errLo(const Int_t &idx) const { return _errLo[idx]; }
+  Double_t get_errHi(const Int_t &idx) const { return _errHi[idx]; }
+  Double_t get_sumw2(const Int_t &idx) const { return _sumw2[idx]; }
 
-  virtual Double_t get_curWeight() const { return _curWeight; }
-  virtual Double_t get_curWgtErrLo() const { return _curWgtErrLo; }
-  virtual Double_t get_curWgtErrHi() const { return _curWgtErrHi; }
-  virtual Double_t get_curSumW2() const { return _curSumW2; }
+  Double_t get_curWeight() const { return _curWeight; }
+  Double_t get_curWgtErrLo() const { return _curWgtErrLo; }
+  Double_t get_curWgtErrHi() const { return _curWgtErrHi; }
+  Double_t get_curSumW2() const { return _curSumW2; }
 
-  virtual Int_t get_curIndex() const { return _curIndex; }
+  Int_t get_curIndex() const { return _curIndex; }
 
   Int_t       _arrSize ; //  Size of the weight array
   std::vector<Int_t> _idxMult ; // Multiplier jump table for index calculation
@@ -180,7 +182,6 @@ protected:
   Double_t*      _binv ; //[_arrSize] Bin volume array  
 
   RooArgSet  _realVars ; // Real dimensions of the dataset 
-  TIterator* _realIter ; //! Iterator over realVars
   Bool_t*    _binValid ; //! Valid bins with current range definition
  
   mutable Double_t _curWeight{0.}; // Weight associated with the current coordinate

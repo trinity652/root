@@ -156,7 +156,7 @@
       if (!postpart) return true;
 
       var pos2 = pos;
-      while ((pos2<this.opt.length) && (this.opt[pos2] !== ' ') && (this.opt[pos2] !== ',') && (this.opt[pos2] !== ';')) pos2++;
+      while ((pos2 < this.opt.length) && (this.opt[pos2] !== ' ') && (this.opt[pos2] !== ',') && (this.opt[pos2] !== ';')) pos2++;
       if (pos2 > pos) {
          this.part = this.opt.substr(pos, pos2-pos);
          this.opt = this.opt.substr(0, pos) + this.opt.substr(pos2);
@@ -166,8 +166,15 @@
 
    /** @summary Returns remaining part of found option as integer. */
    DrawOptions.prototype.partAsInt = function(offset, dflt) {
-      var val = this.part.replace( /^\D+/g, '');
+      var val = this.part.replace(/^\D+/g, '');
       val = val ? parseInt(val,10) : Number.NaN;
+      return isNaN(val) ? (dflt || 0) : val + (offset || 0);
+   }
+
+   /** @summary Returns remaining part of found option as float. */
+   DrawOptions.prototype.partAsFloat = function(offset, dflt) {
+      var val = this.part.replace(/^\D+/g, '');
+      val = val ? parseFloat(val) : Number.NaN;
       return isNaN(val) ? (dflt || 0) : val + (offset || 0);
    }
 
@@ -3935,6 +3942,26 @@
       return false;
    }
 
+   /** @brief Invoke method for object via WebCanvas functionality
+    * @desc Requires that painter marked with object identifier (this.snapid) or identifier provided as second argument
+    * Canvas painter should exists and in non-readonly mode
+    * Execution string can look like "Print()".
+    * Many methods call can be chained with "Print();;Update();;Clear()"
+    * @private */
+
+   TObjectPainter.prototype.WebCanvasExec = function(exec, snapid) {
+      if (!exec || (typeof exec != 'string')) return;
+
+      if (!snapid) snapid = this.snapid;
+      if (!snapid || (typeof snapid != 'string')) return;
+
+      var canp = this.canv_painter();
+      if (canp && !canp._readonly && canp._websocket) {
+         console.log('execute ' + exec + ' for object ' + snapid);
+         canp.SendWebsocket("OBJEXEC:" + snapid + ":" + exec);
+      }
+   }
+
    /** @summary Fill object menu in web canvas
     * @private */
    TObjectPainter.prototype.FillObjectExecMenu = function(menu, kind, call_back) {
@@ -3963,10 +3990,8 @@
 
          if (execp.ExecuteMenuCommand(item)) return;
 
-         if (cp._websocket && execp.args_menu_id && !cp._readonly) {
-            console.log('execute method ' + item.fExec + ' for object ' + execp.args_menu_id);
-            cp.SendWebsocket('OBJEXEC:' + execp.args_menu_id + ":" + item.fExec);
-         }
+         if (execp.args_menu_id)
+            execp.WebCanvasExec(item.fExec, execp.args_menu_id);
       }
 
       function DoFillMenu(_menu, _reqid, _call_back, reply) {
@@ -6017,7 +6042,7 @@
    JSROOT.addDrawFunc({ name: "TEveGeoShapeExtract", icon: 'img_histo3d', prereq: "geom", func: "JSROOT.Painter.drawGeoObject", expand: "JSROOT.GEO.expandObject", opt: ";more;all;count;projx;projz;wire;dflt", ctrl: "dflt"  });
    JSROOT.addDrawFunc({ name: "ROOT::Experimental::TEveGeoShapeExtract", icon: 'img_histo3d', prereq: "geom", func: "JSROOT.Painter.drawGeoObject", expand: "JSROOT.GEO.expandObject", opt: ";more;all;count;projx;projz;wire;dflt", ctrl: "dflt" });
    JSROOT.addDrawFunc({ name: "TGeoOverlap", icon: 'img_histo3d', prereq: "geom", expand: "JSROOT.GEO.expandObject", func: "JSROOT.Painter.drawGeoObject", opt: ";more;all;count;projx;projz;wire;dflt", dflt: "dflt", ctrl: "expand" });
-   JSROOT.addDrawFunc({ name: "TGeoManager", icon: 'img_histo3d', prereq: "geom", expand: "JSROOT.GEO.expandObject", func: "JSROOT.Painter.drawGeoObject", opt: ";more;all;count;projx;projz;wire;dflt", dflt: "expand", ctrl: "dflt" });
+   JSROOT.addDrawFunc({ name: "TGeoManager", icon: 'img_histo3d', prereq: "geom", expand: "JSROOT.GEO.expandObject", func: "JSROOT.Painter.drawGeoObject", opt: ";more;all;count;projx;projz;wire;tracks;dflt", dflt: "expand", ctrl: "dflt" });
    JSROOT.addDrawFunc({ name: /^TGeo/, icon: 'img_histo3d', prereq: "geom", func: "JSROOT.Painter.drawGeoObject", opt: ";more;all;axis;compa;count;projx;projz;wire;dflt", ctrl: "dflt" });
    // these are not draw functions, but provide extra info about correspondent classes
    JSROOT.addDrawFunc({ name: "kind:Command", icon: "img_execute", execute: true });

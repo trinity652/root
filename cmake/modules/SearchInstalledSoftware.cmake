@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 #---Check for installed packages depending on the build options/components eamnbled -
 include(ExternalProject)
 include(FindPackageHandleStandardArgs)
@@ -164,10 +170,10 @@ endif()
 if(NOT builtin_lzma)
   message(STATUS "Looking for LZMA")
   if(fail-on-missing)
-    find_package(LZMA REQUIRED)
+    find_package(LibLZMA REQUIRED)
   else()
-    find_package(LZMA)
-    if(NOT LZMA_FOUND)
+    find_package(LibLZMA)
+    if(NOT LIBLZMA_FOUND)
       message(STATUS "LZMA not found. Switching on builtin_lzma option")
       set(builtin_lzma ON CACHE BOOL "Enabled because LZMA not found (${builtin_lzma_description})" FORCE)
     endif()
@@ -176,10 +182,10 @@ endif()
 
 if(builtin_lzma)
   set(lzma_version 5.2.4)
-  set(LZMA_TARGET LZMA)
+  set(LIBLZMA_TARGET LZMA)
   message(STATUS "Building LZMA version ${lzma_version} included in ROOT itself")
   if(WIN32)
-    set(LZMA_LIBRARIES ${CMAKE_BINARY_DIR}/LZMA/src/LZMA/lib/liblzma.lib)
+    set(LIBLZMA_LIBRARIES ${CMAKE_BINARY_DIR}/LZMA/src/LZMA/lib/liblzma.lib)
     ExternalProject_Add(
       LZMA
       URL ${CMAKE_SOURCE_DIR}/core/lzma/src/xz-${lzma_version}-win32.tar.gz
@@ -190,20 +196,20 @@ if(builtin_lzma)
       BUILD_COMMAND ${CMAKE_COMMAND} -E copy lib/liblzma.lib <INSTALL_DIR>/lib
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy lib/liblzma.dll <INSTALL_DIR>/bin
       LOG_DOWNLOAD 1 LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 BUILD_IN_SOURCE 1
-      BUILD_BYPRODUCTS ${LZMA_LIBRARIES})
+      BUILD_BYPRODUCTS ${LIBLZMA_LIBRARIES})
     install(FILES ${CMAKE_BINARY_DIR}/bin/liblzma.dll DESTINATION ${CMAKE_INSTALL_BINDIR})
-    set(LZMA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/LZMA/src/LZMA/include)
+    set(LIBLZMA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/LZMA/src/LZMA/include)
   else()
     if(CMAKE_CXX_COMPILER_ID MATCHES Clang)
-      set(LZMA_CFLAGS "-Wno-format-nonliteral")
-      set(LZMA_LDFLAGS "-Qunused-arguments")
+      set(LIBLZMA_CFLAGS "-Wno-format-nonliteral")
+      set(LIBLZMA_LDFLAGS "-Qunused-arguments")
     elseif( CMAKE_CXX_COMPILER_ID STREQUAL Intel)
-      set(LZMA_CFLAGS "-wd188 -wd181 -wd1292 -wd10006 -wd10156 -wd2259 -wd981 -wd128 -wd3179 -wd2102")
+      set(LIBLZMA_CFLAGS "-wd188 -wd181 -wd1292 -wd10006 -wd10156 -wd2259 -wd981 -wd128 -wd3179 -wd2102")
     endif()
     if(CMAKE_OSX_SYSROOT)
-      set(LZMA_CFLAGS "${LZMA_CFLAGS} -isysroot ${CMAKE_OSX_SYSROOT}")
+      set(LIBLZMA_CFLAGS "${LIBLZMA_CFLAGS} -isysroot ${CMAKE_OSX_SYSROOT}")
     endif()
-    set(LZMA_LIBRARIES ${CMAKE_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}lzma${CMAKE_STATIC_LIBRARY_SUFFIX})
+    set(LIBLZMA_LIBRARIES ${CMAKE_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}lzma${CMAKE_STATIC_LIBRARY_SUFFIX})
     ExternalProject_Add(
       LZMA
       URL ${CMAKE_SOURCE_DIR}/core/lzma/src/xz-${lzma_version}.tar.gz
@@ -211,10 +217,10 @@ if(builtin_lzma)
       INSTALL_DIR ${CMAKE_BINARY_DIR}
       CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix <INSTALL_DIR> --libdir <INSTALL_DIR>/lib
                         --with-pic --disable-shared --quiet
-                        CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} CFLAGS=${LZMA_CFLAGS} LDFLAGS=${LZMA_LDFLAGS}
+                        CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} CFLAGS=${LIBLZMA_CFLAGS} LDFLAGS=${LIBLZMA_LDFLAGS}
       LOG_DOWNLOAD 1 LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 BUILD_IN_SOURCE 1
-      BUILD_BYPRODUCTS ${LZMA_LIBRARIES})
-    set(LZMA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/include)
+      BUILD_BYPRODUCTS ${LIBLZMA_LIBRARIES})
+    set(LIBLZMA_INCLUDE_DIR ${CMAKE_BINARY_DIR}/include)
   endif()
 endif()
 
@@ -496,6 +502,11 @@ if(opengl AND NOT builtin_glew)
   else()
     find_Package(GLEW)
     if(NOT GLEW_FOUND)
+      # clear variables set to NOTFOUND to allow builtin GLEW to override them
+      foreach(var GLEW_LIBRARIES GLEW_LIBRARY GLEW_LIBRARY_DEBUG GLEW_LIBRARY_RELEASE)
+        unset(${var})
+        unset(${var} CACHE)
+      endforeach()
       message(STATUS "GLEW not found. Switching on builtin_glew option")
       set(builtin_glew ON CACHE BOOL "Enabled because opengl requested and GLEW not found (${builtin_glew_description})" FORCE)
     endif()
@@ -969,8 +980,15 @@ if(opengl AND NOT builtin_ftgl)
     endif()
   endif()
 endif()
+
 if(builtin_ftgl)
+  # clear variables set to NOTFOUND to allow builtin FTGL to override them
+  foreach(var FTGL_LIBRARIES FTGL_LIBRARY FTGL_LIBRARY_DEBUG FTGL_LIBRARY_RELEASE)
+    unset(${var})
+    unset(${var} CACHE)
+  endforeach()
   set(FTGL_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/graf3d/ftgl/inc)
+  set(FTGL_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/graf3d/ftgl/inc)
   set(FTGL_CFLAGS -DBUILTIN_FTGL)
   set(FTGL_LIBRARIES FTGL)
 endif()
@@ -1365,21 +1383,23 @@ endif()
 #---Check for CUDA-----------------------------------------------------------------------
 
 if(cuda OR tmva-gpu)
-  if(CMAKE_CXX_STANDARD EQUAL 11)
-    find_package(CUDA 7.5)
-  elseif(CMAKE_CXX_STANDARD EQUAL 14)
-    message(STATUS "Detected request for c++14, requiring minimum version CUDA 9.0 (default 7.5)")
-    find_package(CUDA 9.0)
-  else()
-    message(FATAL_ERROR "CUDA not supported with C++${CMAKE_CXX_STANDARD}")
+  find_package(CUDA)
+
+  if(CUDA_FOUND)
+    if(NOT DEFINED CMAKE_CUDA_STANDARD)
+      set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+    endif()
+
+    enable_language(CUDA)
+  elseif(fail-on-missing)
+    message(FATAL_ERROR "CUDA not found. Ensure that the installation of CUDA is in the CMAKE_PREFIX_PATH")
   endif()
-  enable_language(CUDA)
+
 endif()
 
 #---TMVA and its dependencies------------------------------------------------------------
 if (tmva AND NOT mlp)
-  message(STATUS "TMVA is enabled while MLP is not: disabling TMVA")
-  set(tmva OFF CACHE BOOL "Disabled because mlp was not activated" FORCE)
+  message(FATAL_ERROR "The 'tmva' option requires 'mlp', please enable mlp with -Dmlp=ON")
 endif()
 
 if(tmva)
@@ -1452,6 +1472,7 @@ if (testing)
   ExternalProject_Add(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_SHALLOW 1
     GIT_TAG release-1.8.0
     UPDATE_COMMAND ""
     # TIMEOUT 10

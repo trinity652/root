@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 #---------------------------------------------------------------------------------------------------
 #  CheckCompiler.cmake
 #---------------------------------------------------------------------------------------------------
@@ -115,7 +121,7 @@ if(NOT CMAKE_CXX_STANDARD MATCHES "11|14|17")
 endif()
 
 # needed by roottest, to be removed once roottest is fixed
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++${CMAKE_CXX_STANDARD}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX${CMAKE_CXX_STANDARD}_STANDARD_COMPILE_OPTION}")
 
 #---Check for libcxx option------------------------------------------------------------
 if(libcxx)
@@ -171,7 +177,7 @@ if(gcctoolchain)
 endif()
 
 if(gnuinstall)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DR__HAVE_CONFIG")
+  set(R__HAVE_CONFIG 1)
 endif()
 
 #---Check if we use the new libstdc++ CXX11 ABI-----------------------------------------------------

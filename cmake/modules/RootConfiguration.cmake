@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 INCLUDE (CheckCXXSourceCompiles)
 
 #---Define a function to do not polute the top level namespace with unneeded variables-----------------------
@@ -619,6 +625,7 @@ set(ROOT_CXX_FLAGS \"${__cxxflags}\")
 set(ROOT_C_FLAGS \"${__cflags}\")
 set(ROOT_fortran_FLAGS \"${__fflags}\")
 set(ROOT_EXE_LINKER_FLAGS \"${CMAKE_EXE_LINKER_FLAGS}\")")
+set(ROOT_BINDIR ${CMAKE_BINARY_DIR}/bin CACHE INTERNAL "")
 
 #---To be used from the binary tree--------------------------------------------------------------------------
 set(ROOT_INCLUDE_DIR_SETUP "
@@ -629,11 +636,15 @@ set(ROOT_LIBRARY_DIR_SETUP "
 # ROOT configured for use from the build tree - absolute paths are used.
 set(ROOT_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib)
 ")
-set(ROOT_BINARY_DIR_SETUP "
+set(ROOT_BINDIR_SETUP "
 # ROOT configured for use from the build tree - absolute paths are used.
-set(ROOT_BINARY_DIR ${CMAKE_BINARY_DIR}/bin)
+set(ROOT_BINDIR ${CMAKE_BINARY_DIR}/bin)
 ")
-set(ROOT_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+# Deprecated value ROOT_BINARY_DIR
+set(ROOT_BINARY_DIR_SETUP "
+# Deprecated value, please don't use it and use ROOT_BINDIR instead.
+set(ROOT_BINARY_DIR ${ROOT_BINDIR})
+")
 
 get_property(exported_targets GLOBAL PROPERTY ROOT_EXPORTED_TARGETS)
 export(TARGETS ${exported_targets} NAMESPACE ROOT:: FILE ${PROJECT_BINARY_DIR}/ROOTConfig-targets.cmake)
@@ -656,11 +667,19 @@ set(ROOT_LIBRARY_DIR_SETUP "
 # ROOT configured for the install with relative paths, so use these
 get_filename_component(ROOT_LIBRARY_DIR \"\${_thisdir}/${ROOT_CMAKE_TO_LIB_DIR}\" ABSOLUTE)
 ")
-set(ROOT_BINARY_DIR_SETUP "
+set(ROOT_BINDIR_SETUP "
 # ROOT configured for the install with relative paths, so use these
-get_filename_component(ROOT_BINARY_DIR \"\${_thisdir}/${ROOT_CMAKE_TO_BIN_DIR}\" ABSOLUTE)
+get_filename_component(ROOT_BINDIR \"\${_thisdir}/${ROOT_CMAKE_TO_BIN_DIR}\" ABSOLUTE)
 ")
-set(ROOT_MODULE_PATH "\${_thisdir}/modules")
+# Deprecated value ROOT_BINARY_DIR
+set(ROOT_BINARY_DIR_SETUP "
+# Deprecated value, please don't use it and use ROOT_BINDIR instead.
+get_filename_component(ROOT_BINARY_DIR \"\${ROOT_BINDIR}\" ABSOLUTE)
+")
+
+# used by ROOTConfig.cmake from the build directory
+configure_file(${CMAKE_SOURCE_DIR}/cmake/modules/RootMacros.cmake
+               ${CMAKE_BINARY_DIR}/RootMacros.cmake COPYONLY)
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake/scripts/ROOTConfig.cmake.in
                ${CMAKE_BINARY_DIR}/installtree/ROOTConfig.cmake @ONLY NEWLINE_STYLE UNIX)

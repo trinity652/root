@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT graf3d/glew package
 ############################################################################
@@ -5,6 +11,7 @@
 # set variables to emulate find_package(GLEW)
 set(GLEW_FOUND TRUE CACHE INTERNAL "" FORCE)
 set(GLEW_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/inc CACHE INTERNAL "" FORCE)
+set(GLEW_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/inc CACHE INTERNAL "" FORCE)
 set(GLEW_LIBRARY GLEW CACHE INTERNAL "" FORCE)
 set(GLEW_LIBRARIES GLEW CACHE INTERNAL "" FORCE)
 

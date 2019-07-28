@@ -27,6 +27,7 @@
 
 #include "TClingDeclInfo.h"
 #include "TClingMethodInfo.h"
+#include "TDataType.h"
 #include "TDictionary.h"
 
 #include <vector>
@@ -94,7 +95,11 @@ public:
      fDecl = D;
      fNameCache.clear(); // invalidate the cache.
    }
-   TDictionary::DeclId_t   GetDeclId() const { return (const clang::Decl*)(fDecl->getCanonicalDecl()); }
+   TDictionary::DeclId_t   GetDeclId() const {
+      if (!fDecl)
+        return nullptr;
+      return (const clang::Decl*)(fDecl->getCanonicalDecl());
+   }
    const clang::FunctionTemplateDecl *GetFunctionTemplate(const char *fname) const;
    TClingMethodInfo     GetMethod(const char *fname) const;
    TClingMethodInfo     GetMethod(const char *fname, const char *proto,
@@ -128,6 +133,8 @@ public:
    void                 Init(const clang::Type &);
    bool                 IsBase(const char *name) const;
    static bool          IsEnum(cling::Interpreter *interp, const char *name);
+   bool                 IsScopedEnum() const;
+   EDataType            GetUnderlyingType() const;
    bool                 IsLoaded() const;
    bool                 IsValidMethod(const char *method, const char *proto, Bool_t objectIsConst, long *offset, ROOT::EFunctionMatchMode mode = ROOT::kConversionMatch) const;
    int                  InternalNext();

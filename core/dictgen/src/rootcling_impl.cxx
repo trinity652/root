@@ -19,6 +19,7 @@ const char *shortHelp =
 
 #include "RConfigure.h"
 #include <ROOT/RConfig.hxx>
+#include <ROOT/FoundationUtils.hxx>
 
 #include <iostream>
 #include <iomanip>
@@ -187,42 +188,6 @@ static void EmitEnums(const std::vector<const clang::EnumDecl *> &enumvec)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-static void GetCurrentDirectory(std::string &output)
-{
-   char fixedLength[1024];
-   char *currWorkDir = fixedLength;
-   size_t len = 1024;
-   char *result = currWorkDir;
-
-   do {
-      if (result == 0) {
-         len = 2 * len;
-         if (fixedLength != currWorkDir) {
-            delete [] currWorkDir;
-         }
-         currWorkDir = new char[len];
-      }
-#ifdef WIN32
-      result = ::_getcwd(currWorkDir, len);
-#else
-      result = getcwd(currWorkDir, len);
-#endif
-   } while (result == 0 && errno == ERANGE);
-
-   output = currWorkDir;
-   output += '/';
-#ifdef WIN32
-   // convert backslashes into forward slashes
-   std::replace(output.begin(), output.end(), '\\', '/');
-#endif
-
-   if (fixedLength != currWorkDir) {
-      delete [] currWorkDir;
-   }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 /// Returns the executable path name, used e.g. by SetRootSys().
 
 const char *GetExePath()
@@ -257,35 +222,6 @@ const char *GetExePath()
 #endif
   }
   return exepath.c_str();
-}
-
-
-
-////////////////////////////////////////////////////////////////////////////////
-/// Convert to path relative to $PWD
-/// If that's not what the caller wants, she should pass -I to rootcling and a
-/// different relative path to the header files.
-
-static std::string GetRelocatableHeaderName(const std::string &header, const std::string &currentDirectory)
-{
-   std::string result(header);
-
-   const char *currWorkDir = currentDirectory.c_str();
-   size_t lenCurrWorkDir = strlen(currWorkDir);
-   if (result.substr(0, lenCurrWorkDir) == currWorkDir) {
-      // Convert to path relative to $PWD.
-      // If that's not what the caller wants, she should pass -I to rootcling and a
-      // different relative path to the header files.
-      result.erase(0, lenCurrWorkDir);
-   }
-   if (gBuildingROOT) {
-      // For ROOT, convert module directories like core/base/inc/ to include/
-      int posInc = result.find("/inc/");
-      if (posInc != -1) {
-         result = /*std::string("include") +*/ result.substr(posInc + 5, -1);
-      }
-   }
-   return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3434,8 +3370,8 @@ void ExtractHeadersForDecls(const RScanner::ClassColl_t &annotatedRcds,
 ////////////////////////////////////////////////////////////////////////////////
 /// Generate the fwd declarations of the selected entities
 
-std::string GenerateFwdDeclString(const RScanner &scan,
-                                  const cling::Interpreter &interp)
+static std::string GenerateFwdDeclString(const RScanner &scan,
+                                         const cling::Interpreter &interp)
 {
    std::string newFwdDeclString;
 
@@ -3664,6 +3600,29 @@ public:
          }
       }
    }
+
+   // rootcling pre-includes things such as Rtypes.h. This means that ACLiC can
+   // call rootcling asking it to create a module for a file with no #includes
+   // but relying on things from Rtypes.h such as the ClassDef macro.
+   //
+   // When rootcling starts building a module, it becomes resilient to the
+   // outside environment and pre-included files have no effect. This hook
+   // informs rootcling when a new submodule is being built so that it can
+   // make Core.Rtypes.h visible.
+   virtual void EnteredSubmodule(clang::Module* M,
+                                 clang::SourceLocation ImportLoc,
+                                 bool ForPragma) {
+      assert(M);
+      using namespace clang;
+      if (llvm::StringRef(M->Name).endswith("ACLiC_dict")) {
+         Preprocessor& PP = m_Interpreter->getCI()->getPreprocessor();
+         HeaderSearch& HS = PP.getHeaderSearchInfo();
+         // FIXME: Reduce to Core.Rtypes.h.
+         Module* CoreModule = HS.lookupModule("Core", /*AllowSearch*/false);
+         assert(M && "Must have module Core");
+         PP.makeModuleVisible(CoreModule, ImportLoc);
+      }
+   }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3809,9 +3768,6 @@ int RootClingMain(int argc,
    int ic, force = 0, onepcm = 0;
    bool ignoreExistingDict = false;
    bool requestAllSymbols = isDeep;
-
-   std::string currentDirectory;
-   GetCurrentDirectory(currentDirectory);
 
    ic = 1;
    if (!gDriverConfig->fBuildingROOTStage1) {
@@ -3991,7 +3947,6 @@ int RootClingMain(int argc,
    bool selSyntaxOnly = false;
    bool noIncludePaths = false;
    bool cxxmodule = false;
-   bool isAclic = false;
 
    // Collect the diagnostic pragmas linked to the usage of -W
    // Workaround for ROOT-5656
@@ -4137,8 +4092,6 @@ int RootClingMain(int argc,
       }
       ic++;
    }
-   if (liblistPrefix.length())
-      isAclic = true;
 
    // Check if we have a multi dict request but no target library
    if (multiDict && sharedLibraryPathName.empty()) {
@@ -4372,6 +4325,8 @@ int RootClingMain(int argc,
 
    AddPlatformDefines(clingArgs);
 
+   std::string currentDirectory = ROOT::FoundationUtils::GetCurrentDir();
+
    std::string interpPragmaSource;
    std::string includeForSource;
    std::string interpreterDeclarations;
@@ -4418,7 +4373,9 @@ int RootClingMain(int argc,
             if (fullheader[fullheader.length() - 1] == '+') {
                fullheader.erase(fullheader.length() - 1);
             }
-            std::string header(isSelectionFile ? fullheader : GetRelocatableHeaderName(fullheader, currentDirectory));
+            std::string header(
+               isSelectionFile ? fullheader
+                               : ROOT::FoundationUtils::MakePathRelative(fullheader, currentDirectory, gBuildingROOT));
 
             interpPragmaSource += std::string("#include \"") + header + "\"\n";
             if (!isSelectionFile) {
@@ -4882,27 +4839,26 @@ int RootClingMain(int argc,
       }
 
 
-      const std::string headersClassesMapString = GenerateStringFromHeadersForClasses(headersDeclsMap,
-                                                                                      detectedUmbrella,
-                                                                                      true);
+      std::string headersClassesMapString = "\"\"";
       std::string fwdDeclsString = "\"\"";
-      if (!gDriverConfig->fBuildingROOTStage1) {
-         if (writeEmptyRootPCM) {
-            fwdDeclsString = "nullptr";
-         } else {
-            fwdDeclsString = GenerateFwdDeclString(scan, interp);
+      if (!cxxmodule) {
+         headersClassesMapString = GenerateStringFromHeadersForClasses(headersDeclsMap,
+                                                                       detectedUmbrella,
+                                                                       true);
+         if (!gDriverConfig->fBuildingROOTStage1) {
+            if (!writeEmptyRootPCM)
+               fwdDeclsString = GenerateFwdDeclString(scan, interp);
          }
       }
-
       modGen.WriteRegistrationSource(dictStream, fwdDeclnArgsToKeepString, headersClassesMapString, fwdDeclsString,
-                                     extraIncludes, cxxmodule && !isAclic);
+                                     extraIncludes, cxxmodule);
       // If we just want to inline the input header, we don't need
       // to generate any files.
       if (!inlineInputHeader) {
          // Write the module/PCH depending on what mode we are on
          if (modGen.IsPCH()) {
             if (!GenerateAllDict(modGen, CI, currentDirectory)) return 1;
-         } else if (cxxmodule && !isAclic) {
+         } else if (cxxmodule) {
             if (!CheckModuleValid(modGen, resourceDir, interp, linkdefFilename, moduleName.str()))
                return 1;
          }
@@ -5017,7 +4973,6 @@ int RootClingMain(int argc,
    // Manually call end of translation unit because we never call the
    // appropriate deconstructors in the interpreter. This writes out the C++
    // module file that we currently generate.
-   if (!isAclic)
    {
       cling::Interpreter::PushTransactionRAII RAII(&interp);
       CI->getSema().getASTConsumer().HandleTranslationUnit(CI->getSema().getASTContext());

@@ -1,3 +1,12 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
+# Test ROOT module
+ROOT_ADD_PYUNITTEST(pyroot_root_module root_module.py)
+
 # General pythonizations
 ROOT_ADD_PYUNITTEST(pyroot_pyz_pretty_printing pretty_printing.py)
 ROOT_ADD_PYUNITTEST(pyroot_pyz_array_interface array_interface.py)
@@ -79,6 +88,9 @@ if (dataframe)
     ROOT_ADD_PYUNITTEST(pyroot_pyz_rdataframe_asnumpy rdataframe_asnumpy.py)
     ROOT_ADD_PYUNITTEST(pyroot_pyz_rdataframe_makenumpy rdataframe_makenumpy.py)
 endif()
+
+# RTensor pythonizations
+ROOT_ADD_PYUNITTEST(pyroot_pyz_rtensor rtensor.py)
 
 # Passing Python callables to ROOT.TF
 ROOT_ADD_PYUNITTEST(pyroot_pyz_tf_pycallables tf_pycallables.py)

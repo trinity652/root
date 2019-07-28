@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 set(ROOT_ARCHITECTURE linux)
 set(ROOT_PLATFORM linux)
 
@@ -69,7 +75,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES s390)
   else()
     message(FATAL_ERROR "There is no Setup for this compiler up to now. Don't know what to do. Stop cmake at this point.")
   endif()
-else()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES i686)
   message(STATUS "Found a 32bit system")
   set(FP_MATH_FLAGS "-msse -mfpmath=sse")
   if(CMAKE_COMPILER_IS_GNUCXX)
@@ -83,6 +89,8 @@ else()
   else()
     message(FATAL_ERROR "There is no Setup for this compiler up to now. Don't know what to do. Stop cmake at this point.")
   endif()
+else()
+  message(FATAL_ERROR "Unknown processor: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
 # JIT must be able to resolve symbols from all ROOT binaries.

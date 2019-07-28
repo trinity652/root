@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT (global) core package
 ############################################################################
@@ -76,30 +82,6 @@ include_directories(
   textinput/inc
 )
 
-ROOT_GENERATE_DICTIONARY(G__Core
-  ${Core_dict_headers}
-  ${Clib_dict_headers}
-  ${Cont_dict_headers}
-  ${Foundation_dict_headers}
-  ${Macosx_dict_headers}
-  ${Unix_dict_headers}
-  ${Winnt_dict_headers}
-  ${ClingUtils_dict_headers}
-  ${Meta_dict_headers}
-  ${TextInput_dict_headers}
-  STAGE1
-  MODULE
-    Core
-  OPTIONS
-    -writeEmptyRootPCM
-    ${dict_opts}
-  LINKDEF
-    base/inc/LinkDef.h
-)
-
-# This is needed becuase LinkDef.h includes other LinkDef starting from  ${CMAKE_SOURCE_DIR}
-set_property(TARGET G__Core PROPERTY INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR})
-
 set(objectlibs $<TARGET_OBJECTS:Base>
                $<TARGET_OBJECTS:Clib>
                $<TARGET_OBJECTS:Cont>
@@ -170,12 +152,37 @@ endif()
 add_subdirectory(rootcling_stage1)
 
 #-------------------------------------------------------------------------------
-ROOT_LINKER_LIBRARY(Core G__Core.cxx $<TARGET_OBJECTS:BaseTROOT> ${objectlibs} BUILTINS LZMA)
+ROOT_LINKER_LIBRARY(Core $<TARGET_OBJECTS:BaseTROOT> ${objectlibs} BUILTINS LZMA)
+
+ROOT_GENERATE_DICTIONARY(G__Core
+  ${Core_dict_headers}
+  ${Clib_dict_headers}
+  ${Cont_dict_headers}
+  ${Foundation_dict_headers}
+  ${Macosx_dict_headers}
+  ${Unix_dict_headers}
+  ${Winnt_dict_headers}
+  ${ClingUtils_dict_headers}
+  ${Meta_dict_headers}
+  ${TextInput_dict_headers}
+  STAGE1
+  NOTARGET
+  MODULE
+    Core
+  OPTIONS
+    -writeEmptyRootPCM
+    ${dict_opts}
+  LINKDEF
+    base/inc/LinkDef.h
+)
+
+# This is needed because LinkDef.h includes other LinkDef starting from ${CMAKE_SOURCE_DIR}
+target_include_directories(Core PRIVATE ${CMAKE_SOURCE_DIR})
 
 target_link_libraries(Core
   PRIVATE
     PCRE::PCRE
-    ${LZMA_LIBRARIES}
+    ${LIBLZMA_LIBRARIES}
     xxHash::xxHash
     LZ4::LZ4
     ZLIB::ZLIB

@@ -6,7 +6,7 @@
 /// is welcome!
 
 /*************************************************************************
- * Copyright (C) 1995-2018, Rene Brun and Fons Rademakers.               *
+ * Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.               *
  * All rights reserved.                                                  *
  *                                                                       *
  * For the licensing terms see $ROOTSYS/LICENSE.                         *
@@ -33,6 +33,11 @@ class THttpServer;
 
 namespace ROOT {
 namespace Experimental {
+
+
+/// function signature for connect/disconnect call-backs
+/// argument is connection id
+using WebWindowConnectCallback_t = std::function<void(unsigned)>;
 
 /// function signature for call-backs from the window clients
 /// first argument is connection id, second is received data
@@ -94,11 +99,14 @@ private:
       void ResetStamps() { fSendStamp = fRecvStamp = std::chrono::system_clock::now(); }
    };
 
-   struct DataEntry {
-      unsigned fConnId{0};         ///<! connection id
-      std::string fData;           ///<! data for given connection
-      DataEntry() = default;
-      DataEntry(unsigned connid, std::string &&data) : fConnId(connid), fData(data) {}
+   enum EQueueEntryKind { kind_None, kind_Connect, kind_Data, kind_Disconnect };
+
+   struct QueueEntry {
+      unsigned fConnId{0};               ///<! connection id
+      EQueueEntryKind fKind{kind_None};  ///<! kind of data
+      std::string fData;                 ///<! data for given connection
+      QueueEntry() = default;
+      QueueEntry(unsigned connid, EQueueEntryKind kind, std::string &&data) : fConnId(connid), fKind(kind), fData(data) {}
    };
 
    typedef std::vector<std::shared_ptr<WebConn>> ConnectionsList;
@@ -117,13 +125,17 @@ private:
    unsigned fConnLimit{1};                          ///<! number of allowed active connections
    bool fNativeOnlyConn{false};                     ///<! only native connection are allowed, created by Show() method
    unsigned fMaxQueueLength{10};                    ///<! maximal number of queue entries
+   WebWindowConnectCallback_t fConnCallback;        ///<! callback for connect event
    WebWindowDataCallback_t fDataCallback;           ///<! main callback when data over channel 1 is arrived
-   std::thread::id fDataThrdId;                     ///<! thread id where data callback should be invoked
-   std::queue<DataEntry> fDataQueue;                ///<! data queue for main callback
-   std::mutex fDataMutex;                           ///<! mutex to protect data queue
+   WebWindowConnectCallback_t fDisconnCallback;     ///<! callback for disconnect event
+   std::thread::id fCallbacksThrdId;                ///<! thread id where callbacks should be invoked
+   bool fCallbacksThrdIdSet{false};                 ///<! flag indicating that thread id is assigned
+   std::queue<QueueEntry> fInputQueue;              ///<! input queue for all callbacks
+   std::mutex fInputQueueMutex;                     ///<! mutex to protect input queue
    unsigned fWidth{0};                              ///<! initial window width when displayed
    unsigned fHeight{0};                             ///<! initial window height when displayed
    float fOperationTmout{50.};                      ///<! timeout in seconds to perform synchronous operation, default 50s
+   std::string fClientVersion;                      ///<! configured client version, used as prefix in scripts URL
    std::string fProtocolFileName;                   ///<! local file where communication protocol will be written
    int fProtocolCnt{-1};                            ///<! counter for protocol recording
    unsigned fProtocolConnId{0};                     ///<! connection id, which is used for writing protocol
@@ -146,7 +158,7 @@ private:
 
    std::string _MakeSendHeader(std::shared_ptr<WebConn> &conn, bool txt, const std::string &data, int chid);
 
-   void ProvideData(unsigned connid, std::string &&arg);
+   void ProvideQueueEntry(unsigned connid, EQueueEntryKind kind, std::string &&arg);
 
    void InvokeCallbacks(bool force = false);
 
@@ -165,6 +177,8 @@ private:
    unsigned AddDisplayHandle(bool batch_mode, const std::string &key, std::unique_ptr<RWebDisplayHandle> &handle);
 
    bool ProcessBatchHolder(std::shared_ptr<THttpCallArg> &arg);
+
+   void AssignCallbackThreadId();
 
 public:
 
@@ -225,6 +239,17 @@ public:
    /// returns true if only native (own-created) connections are allowed
    bool IsNativeOnlyConn() const { return fNativeOnlyConn; }
 
+   /////////////////////////////////////////////////////////////////////////
+   /// Set client version, used as prefix in scripts URL
+   /// When changed, web browser will reload all related JS files while full URL will be different
+   /// Default is empty value - no extra string in URL
+   /// Version should be string like "1.2" or "ver1.subv2" and not contain any special symbols
+   void SetClientVersion(const std::string &vers) { fClientVersion = vers; }
+
+   /////////////////////////////////////////////////////////////////////////
+   /// Returns current client version
+   std::string GetClientVersion() const { return fClientVersion; }
+
    int NumConnections();
 
    unsigned GetConnectionId(int num = 0);
@@ -274,7 +299,13 @@ public:
 
    std::string RelativeAddr(std::shared_ptr<RWebWindow> &win);
 
+   void SetCallBacks(WebWindowConnectCallback_t conn, WebWindowDataCallback_t data, WebWindowConnectCallback_t disconn = nullptr);
+
+   void SetConnectCallBack(WebWindowConnectCallback_t func);
+
    void SetDataCallBack(WebWindowDataCallback_t func);
+
+   void SetDisconnectCallBack(WebWindowConnectCallback_t func);
 
    int WaitFor(WebWindowWaitFunc_t check);
 
@@ -282,6 +313,9 @@ public:
 
    int WaitForTimed(WebWindowWaitFunc_t check, double duration);
 
+   void TerminateROOT();
+
+   static std::shared_ptr<RWebWindow> Create();
 };
 
 } // namespace Experimental

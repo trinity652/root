@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT bindings/pyroot package
 ############################################################################
@@ -86,7 +92,7 @@ endif()
 
 #---Install python modules--------------------------------------------------
 
-foreach(pyfile cppyy.py _pythonization.py ROOT.py)
+foreach(pyfile cppyy.py _pythonization.py ROOT.py _rdf_utils.py)
   install(FILES ${pyfile} DESTINATION ${runtimedir})
   if(IS_ABSOLUTE ${runtimedir})
     set(absruntimedir ${runtimedir})

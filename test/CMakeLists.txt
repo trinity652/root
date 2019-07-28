@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 # CMakeLists.txt for the ROOT test programs.
 # This shows nicely how to compile and link applications
 # using the ROOT libraries on all supported platforms.
@@ -21,11 +27,11 @@ include_directories(${ROOT_INCLUDE_DIRS})
 if(DEFINED ROOT_SOURCE_DIR)  # Testing using the binary tree
   include_directories(${ROOT_SOURCE_DIR}/tutorials)
   include_directories(${ROOT_SOURCE_DIR}/tmva/inc)
-  set(ROOT_root_CMD ${ROOT_BINARY_DIR}/root.exe)
+  set(ROOT_root_CMD ${ROOT_BINDIR}/root.exe)
 else()                       # Testing using an installation (assuming access to ROOT CMake modules)
   include_directories(${ROOT_INCLUDE_DIRS}/../tutorials)
   add_definitions(${ROOT_DEFINITIONS})
-  include(RootNewMacros)
+  include(RootMacros)
 endif()
 
 #---environment-------------------------------------------------------------------------------

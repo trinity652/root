@@ -126,7 +126,9 @@ protected:
    std::shared_ptr<ROOT::Experimental::RWebWindow>  fWebWindow;
    std::vector<Conn>                                fConnList;
 
-   void GeomWindowCallback(unsigned connid, const std::string &arg);
+   void WindowConnect(unsigned connid);
+   void WindowData(unsigned connid, const std::string &arg);
+   void WindowDisconnect(unsigned connid);
 
 public:
    REveManager(); // (Bool_t map_window=kTRUE, Option_t* opt="FI");
@@ -172,8 +174,8 @@ public:
    void ElementChanged(REveElement* element, Bool_t update_scenes=kTRUE, Bool_t redraw=kFALSE);
    void ScenesChanged(REveElement::List_t& scenes);
 
-   void AddElement(REveElement* element, REveElement* parent=0);
-   void AddGlobalElement(REveElement* element, REveElement* parent=0);
+   void AddElement(REveElement *element, REveElement* parent = nullptr);
+   void AddGlobalElement(REveElement *element, REveElement* parent = nullptr);
 
    void RemoveElement(REveElement* element, REveElement* parent);
 
@@ -208,6 +210,9 @@ public:
 
    void ClearROOTClassSaved();
 
+   void AddLocation(const std::string& name, const std::string& path);
+   void SetDefaultHtmlPage(const std::string& path);
+   
    static REveManager* Create();
    static void         Terminate();
 
@@ -216,7 +221,6 @@ public:
 
    void EnforceTimerActive (Bool_t ta) { fTimerActive = ta; }
 
-   void HttpServerCallback(unsigned connid, const std::string &arg);
    // void Send(void* buff, unsigned connid);
    void Send(unsigned connid, const std::string &data);
    void SendBinary(unsigned connid, const void *data, std::size_t len);

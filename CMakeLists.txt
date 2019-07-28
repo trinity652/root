@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 
 set(policy_new CMP0072 CMP0077)
@@ -107,7 +113,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 #---Load some basic macros which are needed later for the confiuration and build----------------
 include(RootBuildOptions)
-include(RootNewMacros)
+include(RootMacros)
 include(CheckCompiler)
 include(CheckAssembler)
 include(CheckIntrinsics)
@@ -157,7 +163,6 @@ ROOT_CHECK_OUT_OF_SOURCE_BUILD()
 
 #---Here we look for installed software and switch on and of the different build options--------
 include(SearchInstalledSoftware)
-ROOT_SHOW_ENABLED_OPTIONS()
 
 #---Here we add tcmalloc to the linker flags if needed------------------------------------------
 if (TCMALLOC_FOUND)
@@ -323,8 +328,8 @@ add_dependencies(move_headers copymodulemap)
 
 # Provide our own modulemap for implementations other than libcxx.
 if (NOT WIN32 AND NOT libcxx)
-  configure_file(${CMAKE_SOURCE_DIR}/build/unix/stl.modulemap ${CMAKE_BINARY_DIR}/include/stl.modulemap)
-  install(FILES "${CMAKE_BINARY_DIR}/include/stl.modulemap" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT headers)
+  configure_file(${CMAKE_SOURCE_DIR}/build/unix/std.modulemap ${CMAKE_BINARY_DIR}/include/std.modulemap)
+  install(FILES "${CMAKE_BINARY_DIR}/include/std.modulemap" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT headers)
   configure_file(${CMAKE_SOURCE_DIR}/build/unix/libc.modulemap ${CMAKE_BINARY_DIR}/include/libc.modulemap)
   install(FILES "${CMAKE_BINARY_DIR}/include/libc.modulemap" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT headers)
 endif()
@@ -340,10 +345,8 @@ file(WRITE "${CMAKE_BINARY_DIR}/include/module.modulemap.extra" "${__modulemap_e
 set(ROOT_CXXMODULES_WRITE_TO_CURRENT_DIR ON)
 
 #---Global PCH-----------------------------------------------------------------------------------
-get_property(__allTargets GLOBAL PROPERTY ROOT_DICTIONARY_TARGETS)
-get_property(__allFiles GLOBAL PROPERTY ROOT_DICTIONARY_FILES)
 get_property(__clingetcpch GLOBAL PROPERTY CLINGETCPCH)
-
+get_property(__pch_dependencies GLOBAL PROPERTY ROOT_PCH_DEPENDENCIES)
 
 set (CMAKE_CXX_FLAGS_SEPARATE "${CMAKE_CXX_FLAGS}")
 if(cxxmodules)
@@ -367,7 +370,7 @@ add_custom_command(OUTPUT etc/dictpch/allLinkDefs.h
                           etc/dictpch/allHeaders.h
                           etc/dictpch/allCppflags.txt
                    COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.py ${CMAKE_SOURCE_DIR} . ${pyroot_experimental} ${__clingetcpch} -- ${CMAKE_CXX_FLAGS_SEPARATE}
-                   DEPENDS ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.py ${__allFiles})
+                   DEPENDS ${CMAKE_SOURCE_DIR}/build/unix/makepchinput.py ${__pch_dependencies})
 
 get_property(incdirs DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
 foreach(d ${incdirs})
@@ -400,8 +403,6 @@ else()
                             etc/dictpch/allCppflags.txt
                             rootcling)
   add_custom_target(onepcm ALL DEPENDS etc/allDict.cxx.pch)
-  set_source_files_properties(${__allFiles} PROPERTIES GENERATED TRUE)
-  add_dependencies(onepcm ${__allTargets})
   install(FILES ${CMAKE_BINARY_DIR}/etc/allDict.cxx.pch DESTINATION ${CMAKE_INSTALL_SYSCONFDIR})
   install(DIRECTORY ${CMAKE_BINARY_DIR}/etc/dictpch DESTINATION ${CMAKE_INSTALL_SYSCONFDIR})
 endif()
@@ -459,12 +460,7 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_INSTALL_PREFIX)
                          PATTERN "system.rootrc" EXCLUDE
                          PATTERN "system.rootauthrc" EXCLUDE
                          PATTERN "system.rootdaemonrc" EXCLUDE
-                         PATTERN "rootd.rc.d" EXCLUDE
-                         PATTERN "proofd.rc.d" EXCLUDE
-                         PATTERN "rootd.xinetd" EXCLUDE
-                         PATTERN "proofd.xinetd" EXCLUDE
                          PATTERN "root.mimes" EXCLUDE
-                         PATTERN "cmake" EXCLUDE
                          PATTERN "*.in" EXCLUDE)
   install(DIRECTORY fonts/  DESTINATION ${CMAKE_INSTALL_FONTDIR})
   install(DIRECTORY icons/  DESTINATION ${CMAKE_INSTALL_ICONDIR})
@@ -477,7 +473,7 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_INSTALL_PREFIX)
   endif()
   install(DIRECTORY man/    DESTINATION ${CMAKE_INSTALL_MANDIR})
   install(DIRECTORY tutorials/ DESTINATION ${CMAKE_INSTALL_TUTDIR} COMPONENT tests)
-  install(DIRECTORY cmake/modules DESTINATION ${CMAKE_INSTALL_CMAKEDIR} PATTERN "Find*.cmake" EXCLUDE)
+  install(FILES cmake/modules/RootMacros.cmake DESTINATION ${CMAKE_INSTALL_CMAKEDIR})
 endif()
 
 #---Make sure the Jupyter ROOT C++ kernel runs with the same Python version as ROOT-----
@@ -502,10 +498,6 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/modules/CTestCustom.cmake ${CMAKE_BINAR
 if(testing)
   include(RootCTest)
   if(roottest)
-    find_package(Git REQUIRED)
-    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    OUTPUT_VARIABLE GIT_BRANCH OUTPUT_STRIP_TRAILING_WHITESPACE)
     #---Is the roottest source directory around?
     if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/roottest)
       set(roottestdir ${CMAKE_CURRENT_SOURCE_DIR}/roottest)
@@ -520,9 +512,25 @@ if(testing)
       add_subdirectory(${roottestdir} roottest)
     else()
       message("-- Could not find roottest directory! Cloning from the repository...")
+
+      find_package(Git REQUIRED)
+
+      if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/.git)
+        execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        OUTPUT_VARIABLE GIT_BRANCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+      else()
+        set(GIT_BRANCH v${ROOT_MAJOR_VERSION}-${ROOT_MINOR_VERSION}-${ROOT_PATCH_VERSION})
+      endif()
+
       execute_process(COMMAND ${GIT_EXECUTABLE} clone -b ${GIT_BRANCH}
                       https://github.com/root-project/roottest.git
                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+      if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/roottest)
+        message(FATAL_ERROR "Error cloning roottest")
+      endif()
+
       add_subdirectory(roottest)
     endif()
   endif()
@@ -553,6 +561,8 @@ if(testing)
     endif()
   endif()
 endif()
+
+ROOT_SHOW_ENABLED_OPTIONS()
 
 #---Packaging-------------------------------------------------------------------------------------
 include(RootCPack)

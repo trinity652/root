@@ -1,10 +1,20 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT bindings/pyroot_experimental package
 ############################################################################
 
 if(dataframe)
-    list(APPEND PYROOT_EXTRA_PYSOURCE ROOT/pythonization/_rdataframe.py)
-    list(APPEND PYROOT_EXTRA_SOURCE src/RDataFramePyz.cxx)
+    list(APPEND PYROOT_EXTRA_PYSOURCE
+        ROOT/pythonization/_rdataframe.py
+        ROOT/pythonization/_rtensor.py)
+    list(APPEND PYROOT_EXTRA_SOURCE
+        src/RDataFramePyz.cxx
+        src/RTensorPyz.cxx)
 endif()
 
 set(py_sources
@@ -12,6 +22,7 @@ set(py_sources
   ROOT/_application.py
   ROOT/_facade.py
   ROOT/pythonization/__init__.py
+  ROOT/pythonization/_cppinstance.py
   ROOT/pythonization/_drawables.py
   ROOT/pythonization/_generic.py
   ROOT/pythonization/_rooabscollection.py
@@ -53,6 +64,7 @@ set(sources
   src/TTreePyz.cxx
   src/PyzCppHelpers.cxx
   src/PyzPythonHelpers.cxx
+  src/CPPInstancePyz.cxx
   ${PYROOT_EXTRA_SOURCE}
 )
 

@@ -116,9 +116,10 @@ clang/LLVM technology.
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Object/SymbolicFile.h"
+#include "llvm/Support/FileSystem.h"
 
 #include <algorithm>
 #include <iostream>
@@ -1045,37 +1046,8 @@ std::string TCling::ToString(const char* type, void* obj)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-///\returns true if the module map was loaded, false on error or if the map was
-///         already loaded.
-static bool RegisterPrebuiltModulePath(clang::Preprocessor& PP,
-                                       const std::string& FullPath) {
-   assert(llvm::sys::path::is_absolute(FullPath));
-   FileManager& FM = PP.getFileManager();
-   // FIXME: In a ROOT session we can add an include path (through .I /inc/path)
-   // We should look for modulemap files there too.
-   const DirectoryEntry *DE = FM.getDirectory(FullPath);
-   if (DE) {
-      HeaderSearch& HS = PP.getHeaderSearchInfo();
-      const FileEntry *FE = HS.lookupModuleMapFile(DE, /*IsFramework*/ false);
-      const auto &ModPaths = HS.getHeaderSearchOpts().PrebuiltModulePaths;
-      bool pathExists = std::find(ModPaths.begin(), ModPaths.end(), FullPath) != ModPaths.end();
-      if (!pathExists)
-         HS.getHeaderSearchOpts().AddPrebuiltModulePath(FullPath);
-      // FIXME: Calling IsLoaded is slow! Replace this with the appropriate
-      // call to the clang::ModuleMap class.
-      if (FE && !gCling->IsLoaded(FE->getName().data())) {
-         assert(!pathExists && "Prebuilt module path was added w/o loading a modulemap!");
-         if (!HS.loadModuleMapFile(FE, /*IsSystem*/ false))
-            return true;
-         Error("TCling::LoadModule", "Could not load modulemap in the current directory");
-      }
-   }
-   return false;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 ///\returns true if the module was loaded.
-static bool LoadModule(const std::string &ModuleName, cling::Interpreter &interp, bool Complain = true)
+static bool LoadModule(const std::string &ModuleName, cling::Interpreter &interp)
 {
    // When starting up ROOT, cling would load all modulemap files on the include
    // paths. However, in a ROOT session, it is very common to run aclic which
@@ -1084,11 +1056,10 @@ static bool LoadModule(const std::string &ModuleName, cling::Interpreter &interp
    //
    // Before failing, try loading the modulemap in the current folder and try
    // loading the requested module from it.
-   clang::Preprocessor& PP = interp.getCI()->getPreprocessor();
    std::string currentDir = gSystem->WorkingDirectory();
    assert(!currentDir.empty());
-   RegisterPrebuiltModulePath(PP, currentDir);
-   return interp.loadModule(ModuleName, Complain);
+   gCling->RegisterPrebuiltModulePath(currentDir);
+   return interp.loadModule(ModuleName, /*Complain=*/true);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1129,10 +1100,11 @@ static void RegisterCxxModules(cling::Interpreter &clingInterp)
 
       // Load libc and stl first.
 #ifdef R__MACOSX
-   LoadModules({"Darwin", "std"}, clingInterp);
+   LoadModule("Darwin", clingInterp);
 #else
-   LoadModules({"libc", "stl"}, clingInterp);
+   LoadModule("libc", clingInterp);
 #endif
+   LoadModule("std", clingInterp);
 
    // Load core modules
    // This should be vector in order to be able to pass it to LoadModules
@@ -1721,6 +1693,45 @@ namespace {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+///\returns true if the module map was loaded, false on error or if the map was
+///         already loaded.
+bool TCling::RegisterPrebuiltModulePath(const std::string &FullPath,
+                                        const std::string &ModuleMapName /*= "module.modulemap"*/) const
+{
+   assert(llvm::sys::path::is_absolute(FullPath));
+   Preprocessor &PP = fInterpreter->getCI()->getPreprocessor();
+   FileManager &FM = PP.getFileManager();
+   // FIXME: In a ROOT session we can add an include path (through .I /inc/path)
+   // We should look for modulemap files there too.
+   const DirectoryEntry *DE = FM.getDirectory(FullPath);
+   if (DE) {
+      HeaderSearch &HS = PP.getHeaderSearchInfo();
+      HeaderSearchOptions &HSOpts = HS.getHeaderSearchOpts();
+      const auto &ModPaths = HSOpts.PrebuiltModulePaths;
+      bool pathExists = std::find(ModPaths.begin(), ModPaths.end(), FullPath) != ModPaths.end();
+      if (!pathExists)
+         HSOpts.AddPrebuiltModulePath(FullPath);
+      // We cannot use HS.lookupModuleMapFile(DE, /*IsFramework*/ false);
+      // because its internal call to getFile has CacheFailure set to true.
+      // In our case, modulemaps can appear any time due to ACLiC.
+      // Code copied from HS.lookupModuleMapFile.
+      llvm::SmallString<256> ModuleMapFileName(DE->getName());
+      llvm::sys::path::append(ModuleMapFileName, ModuleMapName);
+      const FileEntry *FE = FM.getFile(ModuleMapFileName, /*openFile*/ false,
+                                       /*CacheFailure*/ false);
+
+      // FIXME: Calling IsLoaded is slow! Replace this with the appropriate
+      // call to the clang::ModuleMap class.
+      if (FE && !this->IsLoaded(FE->getName().data())) {
+         if (!HS.loadModuleMapFile(FE, /*IsSystem*/ false))
+            return true;
+         Error("RegisterPrebuiltModulePath", "Could not load modulemap in %s", ModuleMapFileName.c_str());
+      }
+   }
+   return false;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 /// List of dicts that have the PCM information already in the PCH.
 static const std::unordered_set<std::string> gIgnoredPCMNames = {"libCore",
                                                                  "libRint",
@@ -2026,13 +2037,17 @@ void TCling::RegisterModule(const char* modulename,
       // specifying the relevant include paths we should try loading the
       // modulemap next to the library location.
       clang::Preprocessor &PP = TheSema.getPreprocessor();
-      // Can be nullptr in case of libCore.
-      if (dyLibName)
-         RegisterPrebuiltModulePath(PP, llvm::sys::path::parent_path(dyLibName));
+      std::string ModuleMapName;
+      if (isACLiC)
+         ModuleMapName = ModuleName + ".modulemap";
+      else
+         ModuleMapName = "module.modulemap";
+      RegisterPrebuiltModulePath(llvm::sys::path::parent_path(dyLibName),
+                                 ModuleMapName);
 
       // FIXME: We should only complain for modules which we know to exist. For example, we should not complain about
       // modules such as GenVector32 because it needs to fall back to GenVector.
-      ModuleWasSuccessfullyLoaded = LoadModule(ModuleName, *fInterpreter, /*Complain=*/ !isACLiC);
+      ModuleWasSuccessfullyLoaded = LoadModule(ModuleName, *fInterpreter);
       if (!ModuleWasSuccessfullyLoaded) {
          // Only report if we found the module in the modulemap.
          clang::HeaderSearch &headerSearch = PP.getHeaderSearchInfo();
@@ -6071,14 +6086,20 @@ static StringRef GetGnuHashSection(llvm::object::ObjectFile *file) {
    return "";
 }
 
-// Bloom filter. See https://blogs.oracle.com/solaris/gnu-hash-elf-sections-v2
-// for detailed desctiption. In short, there is a .gnu.hash section in so files which contains
-// bloomfilter hash value that we can compare with our mangled_name hash. This is a false positive
-// probability data structure and enables us to skip libraries which doesn't contain mangled_name definition!
-// PE and Mach-O files doesn't have .gnu.hash bloomfilter section, so this is a specific optimization for ELF.
-// This is fine because performance critical part (data centers) are running on Linux :)
-static bool LookupBloomFilter(llvm::object::ObjectFile *soFile, uint32_t hash) {
-   const int bits = 64;
+/// Bloom filter in a stohastic data structure which can tell us if a symbol
+/// name does not exist in a library with 100% certainty. If it tells us it exists
+/// this may not be true: https://blogs.oracle.com/solaris/gnu-hash-elf-sections-v2
+///
+/// ELF has this optimization in the new linkers by default, It is stored in the
+/// gnu.hash section of the object file.
+///
+///\returns true true if the symbol may be in the library.
+static bool MayExistInObjectFile(llvm::object::ObjectFile *soFile, uint32_t hash) {
+   if (!soFile->isELF())
+      return true;
+
+   // LLVM9: soFile->makeTriple().is64Bit()
+   const int bits = 8 * soFile->getBytesInAddress();
 
    StringRef contents = GetGnuHashSection(soFile);
    if (contents.size() < 16)
@@ -6099,16 +6120,25 @@ static bool LookupBloomFilter(llvm::object::ObjectFile *soFile, uint32_t hash) {
    return  (bitmask & word) == bitmask;
 }
 
-// Lookup for normal symbols
-static bool LookupNormalSymbols(llvm::object::ObjectFile *RealSoFile, const std::string& mangled_name, const std::string& LibName)
+/// Looks up symbols from a an object file, representing the library.
+///\returns true on success.
+static bool FindSymbol(const std::string &library_filename,
+                       const std::string &mangled_name)
 {
+   auto ObjF = llvm::object::ObjectFile::createObjectFile(library_filename);
+   if (!ObjF) {
+      Warning("TCling__FindSymbol", "Failed to read object file %s", library_filename.c_str());
+      return false;
+   }
+
+   llvm::object::ObjectFile *BinObjFile = ObjF.get().getBinary();
+
    uint32_t hashedMangle = GNUHash(mangled_name);
-   // Check Bloom filter. If false, it means that this library doesn't contain mangled_name defenition
-   if (!LookupBloomFilter(RealSoFile, hashedMangle))
+   // If the symbol does not exist, exit early. In case it may exist, iterate.
+   if (!MayExistInObjectFile(BinObjFile, hashedMangle))
       return false;
 
-   auto Symbols = RealSoFile->symbols();
-   for (auto S : Symbols) {
+   for (const auto &S : BinObjFile->symbols()) {
       uint32_t Flags = S.getFlags();
       // DO NOT insert to table if symbol was undefined
       if (Flags & llvm::object::SymbolRef::SF_Undefined)
@@ -6125,7 +6155,38 @@ static bool LookupNormalSymbols(llvm::object::ObjectFile *RealSoFile, const std:
 
       llvm::Expected<StringRef> SymNameErr = S.getName();
       if (!SymNameErr) {
-         Warning("LookupNormalSymbols", "Failed to read symbol");
+         Warning("TCling__FindSymbol", "Failed to read symbol %s", mangled_name.c_str());
+         continue;
+      }
+
+      if (SymNameErr.get() == mangled_name)
+         return true;
+   }
+
+   if (!BinObjFile->isELF())
+      return false;
+
+   // ELF file format has .dynstr section for the dynamic symbol table.
+   const auto *ElfObj = cast<llvm::object::ELFObjectFileBase>(BinObjFile);
+
+   for (const auto &S : ElfObj->getDynamicSymbolIterators()) {
+      uint32_t Flags = S.getFlags();
+      // DO NOT insert to table if symbol was undefined
+      if (Flags & llvm::object::SymbolRef::SF_Undefined)
+         continue;
+
+      // Note, we are at last resort and loading library based on a weak
+      // symbol is allowed. Otherwise, the JIT will issue an unresolved
+      // symbol error.
+      //
+      // There are other weak symbol kinds (marked as 'V') to denote
+      // typeinfo and vtables. It is unclear whether we should load such
+      // libraries or from which library we should resolve the symbol.
+      // We seem to not have a way to differentiate it from the symbol API.
+
+      llvm::Expected<StringRef> SymNameErr = S.getName();
+      if (!SymNameErr) {
+         Warning("TCling__FindSymbol", "Failed to read symbol %s", mangled_name.c_str());
          continue;
       }
 
@@ -6136,9 +6197,10 @@ static bool LookupNormalSymbols(llvm::object::ObjectFile *RealSoFile, const std:
    return false;
 }
 
-static void* LazyFunctionCreatorAutoloadForModule(const std::string& mangled_name,
-                                                  cling::Interpreter *fInterpreter) {
-   using namespace llvm::object;
+static std::string ResolveSymbol(const std::string& mangled_name,
+                                 cling::Interpreter *interp,
+                                 bool searchSystem = true) {
+   assert(!mangled_name.empty());
    using namespace llvm::sys::path;
    using namespace llvm::sys::fs;
 
@@ -6146,106 +6208,109 @@ static void* LazyFunctionCreatorAutoloadForModule(const std::string& mangled_nam
 
    static bool sFirstRun = true;
    static bool sFirstSystemLibrary = true;
-   // sLibraies contains pair of sPaths[i] (eg. /home/foo/module) and library name (eg. libTMVA.so). The
-   // reason why we're separating sLibraries and sPaths is that we have a lot of
-   // dupulication in path, for example we have "/home/foo/module-release/lib/libFoo.so", "/home/../libBar.so", "/home/../lib.."
-   // and it's waste of memory to store the full path.
-   static std::vector< std::pair<uint32_t, std::string> > sLibraries;
-   static std::vector<std::string> sPaths;
+   // LibraryPath contains a pair offset to the canonical dirname (stored as
+   // sPaths[i]) and a filename. For example, `/home/foo/root/lib/libTMVA.so`,
+   // the .first will contain an index in sPaths where `/home/foo/root/lib/`
+   // will be stored and .second `libTMVA.so`.
+   // This approach reduces the duplicate paths as at one location there may be
+   // plenty of libraries.
+   using LibraryPath = std::pair<uint32_t, std::string>;
+   using LibraryPaths = std::vector<LibraryPath>;
+   using BasePaths = std::vector<std::string>;
+   static LibraryPaths sLibraries;
+   static BasePaths sPaths;
+   static LibraryPaths sQueriedLibraries;
 
    // For system header autoloading
-   static std::vector< std::pair<uint32_t, std::string> > sSysLibraries;
-   static std::vector<std::string> sSysPaths;
+   static LibraryPaths sSysLibraries;
 
    if (sFirstRun) {
-      TCling__FindLoadedLibraries(sLibraries, sPaths, *fInterpreter, /* searchSystem */ false);
+      TCling__FindLoadedLibraries(sLibraries, sPaths, *interp, /* searchSystem */ false);
       sFirstRun = false;
    }
 
-   // The JIT gives us a mangled name which has only one leading underscore on
-   // all platforms, for instance _ZN8TRandom34RndmEv. However, on OSX the
-   // linker stores this symbol as __ZN8TRandom34RndmEv (adding an extra _).
-#ifdef R__MACOSX
-   std::string name_in_so = "_" + mangled_name;
-#else
-   std::string name_in_so = mangled_name;
-#endif
-
-
-   // Iterate over files under this path. We want to get each ".so" files
-   for (std::pair<uint32_t, std::string> &P : sLibraries) {
-      llvm::SmallString<400> Vec(sPaths[P.first]);
+   auto GetLibFileName = [](const LibraryPath &P, const BasePaths &BaseP) {
+      llvm::SmallString<512> Vec(BaseP[P.first]);
       llvm::sys::path::append(Vec, StringRef(P.second));
-      const std::string LibName = Vec.str();
+      return Vec.str().str();
+   };
 
-      auto SoFile = ObjectFile::createObjectFile(LibName);
-      if (!SoFile)
-         continue;
+   if (!sQueriedLibraries.empty()) {
+      // Last call we were asked if a library contains a symbol. Usually, the
+      // caller wants to load this library. Check if was loaded and remove it
+      // from our lists of not-yet-loaded libs.
+      for (const LibraryPath &P : sQueriedLibraries) {
+         const std::string LibName = GetLibFileName(P, sPaths);
+         if (!gCling->IsLibraryLoaded(LibName.c_str()))
+            continue;
 
-      if (LookupNormalSymbols(SoFile.get().getBinary(), name_in_so, LibName)) {
-         if (gSystem->Load(LibName.c_str(), "", false) < 0)
-            Error("LazyFunctionCreatorAutoloadForModule", "Failed to load library %s", LibName.c_str());
-
-         // We want to delete a loaded library from sLibraries cache, because sLibraries is
-         // a vector of candidate libraries which might be loaded in the future.
          sLibraries.erase(std::remove(sLibraries.begin(), sLibraries.end(), P), sLibraries.end());
-         void* addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(mangled_name.c_str());
-         return addr;
+         if (!sSysLibraries.empty())
+            sSysLibraries.erase(std::remove(sSysLibraries.begin(), sSysLibraries.end(), P), sSysLibraries.end());
       }
    }
 
-   // Normal lookup failed! Fall back to system library
+   if (sFirstRun) {
+      TCling__FindLoadedLibraries(sLibraries, sPaths, *interp, /* searchSystem */ false);
+      sFirstRun = false;
+   }
+
+   // Iterate over files under this path. We want to get each ".so" files
+   for (const LibraryPath &P : sLibraries) {
+      const std::string LibName = GetLibFileName(P, sPaths);
+
+      // FIXME: We should also iterate over the dynamic symbols for ROOT
+      // libraries. However, it seems to be redundant for the moment as we do
+      // not strictly require symbols from those sections. Enable after checking
+      // performance!
+      if (FindSymbol(LibName, mangled_name)) {
+         sQueriedLibraries.push_back(P);
+         return LibName;
+      }
+   }
+
+   if (!searchSystem)
+      return "";
+
+   // Lookup in non-system libraries failed. Expand the search to the system.
    if (sFirstSystemLibrary) {
-      TCling__FindLoadedLibraries(sSysLibraries, sSysPaths, *fInterpreter, /* searchSystem */ true);
+      TCling__FindLoadedLibraries(sSysLibraries, sPaths, *interp, /* searchSystem */ true);
       sFirstSystemLibrary = false;
    }
 
-   for (std::pair<uint32_t, std::string> &P : sSysLibraries) {
-      llvm::SmallString<400> Vec(sSysPaths[P.first]);
-      llvm::sys::path::append(Vec, StringRef(P.second));
-      const std::string LibName = Vec.str();
+   for (const LibraryPath &P : sSysLibraries) {
+      const std::string LibName = GetLibFileName(P, sPaths);
 
-      auto SoFile = ObjectFile::createObjectFile(LibName);
-      if (!SoFile)
-         continue;
-
-      auto RealSoFile = SoFile.get().getBinary();
-
-      if (LookupNormalSymbols(RealSoFile, name_in_so, LibName)) {
-         if (gSystem->Load(LibName.c_str(), "", false) < 0)
-            Error("LazyFunctionCreatorAutoloadForModule", "Failed to load library %s", LibName.c_str());
-
-         sSysLibraries.erase(std::remove(sSysLibraries.begin(), sSysLibraries.end(), P), sSysLibraries.end());
-         void* addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(mangled_name.c_str());
-         return addr;
-      }
-
-      // Lookup for dynamic symbols
-      auto sections = RealSoFile->sections();
-      for (auto section : sections) {
-         llvm::StringRef sectionName;
-         section.getName(sectionName);
-
-         // .dynstr contains string of dynamic symbols
-         if (sectionName == ".dynstr") {
-            llvm::StringRef dContents;
-            section.getContents(dContents);
-            // If this library contains mangled name
-            if (dContents.contains(mangled_name)) {
-               if (gSystem->Load(LibName.c_str(), "", false) < 0)
-                  Error("LazyFunctionCreatorAutoloadForModule", "Failed to load library %s", LibName.c_str());
-
-               // Delete a loaded library from sLibraries cache.
-               sSysLibraries.erase(std::remove(sSysLibraries.begin(), sSysLibraries.end(), P), sSysLibraries.end());
-               void* addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(mangled_name.c_str());
-               return addr;
-            }
-         }
+      if (FindSymbol(LibName, mangled_name)) {
+         sQueriedLibraries.push_back(P);
+         return LibName;
       }
    }
 
-   // Lookup failed!!!!
-   return nullptr;
+   return ""; // Search found no match.
+}
+
+static void* LazyFunctionCreatorAutoloadForModule(const std::string &mangled_name,
+                                                  cling::Interpreter *interp) {
+// The JIT gives us a mangled name which has only one leading underscore on
+// all platforms, for instance _ZN8TRandom34RndmEv. However, on OSX the
+// linker stores this symbol as __ZN8TRandom34RndmEv (adding an extra _).
+   std::string maybe_prefixed_mangled_name = mangled_name;
+#ifdef R__MACOSX
+   assert(llvm::StringRef(mangled_name).startswith("__"));
+   maybe_prefixed_mangled_name = "_" + maybe_prefixed_mangled_name;
+#endif
+
+   std::string LibName = ResolveSymbol(maybe_prefixed_mangled_name, interp);
+   if (LibName.empty())
+      return nullptr;
+
+   if (gSystem->Load(LibName.c_str(), "", false) < 0)
+      Error("TCling__LazyFunctionCreatorAutoloadForModule",
+            "Failed to load library %s", LibName.c_str());
+
+   void* addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(mangled_name.c_str());
+   return addr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -6906,14 +6971,99 @@ const char* TCling::GetClassSharedLibs(const char* cls)
    return 0;
 }
 
+/// This interface returns a list of dependent libraries in the form:
+/// lib libA.so libB.so libC.so. The first library is the library we are
+/// searching dependencies for.
+/// Note: In order to speed up the search, we display the dependencies of the
+/// libraries which are not yet loaded. For instance, if libB.so was already
+/// loaded the list would contain: lib libA.so libC.so.
+static std::string GetSharedLibImmediateDepsSlow(std::string lib,
+                                                 cling::Interpreter *interp,
+                                                 bool skipLoadedLibs = true)
+{
+   TString LibFullPath(lib);
+   if (!llvm::sys::path::is_absolute(lib)) {
+      if (!gSystem->FindDynamicLibrary(LibFullPath, /*quiet=*/true)) {
+         Error("TCling__GetSharedLibImmediateDepsSlow", "Cannot find library '%s'", lib.c_str());
+         return "";
+      }
+   } else {
+      lib = llvm::sys::path::filename(lib);
+   }
+
+   auto ObjF = llvm::object::ObjectFile::createObjectFile(LibFullPath.Data());
+   if (!ObjF) {
+      Warning("TCling__GetSharedLibImmediateDepsSlow", "Failed to read object file %s", lib.c_str());
+      return "";
+   }
+
+   llvm::object::ObjectFile *BinObjFile = ObjF.get().getBinary();
+
+   std::set<string> DedupSet;
+   std::string Result = lib + ' ';
+   for (const auto &S : BinObjFile->symbols()) {
+      uint32_t Flags = S.getFlags();
+      if (Flags & llvm::object::SymbolRef::SF_Undefined) {
+         llvm::Expected<StringRef> SymNameErr = S.getName();
+         if (!SymNameErr) {
+            Warning("GetSharedLibDepsForModule", "Failed to read symbol");
+            continue;
+         }
+         llvm::StringRef SymName = SymNameErr.get();
+         if (SymName.empty())
+            continue;
+
+         // Skip the symbols which are part of the C/C++ runtime and have a
+         // fixed library version. See binutils ld VERSION. Those reside in
+         // 'system' libraries, which we avoid in ResolveSymbol.
+         if (BinObjFile->isELF() && (SymName.contains("@@GLIBCXX") ||
+                                     SymName.contains("@@CXXABI") ||
+                                     SymName.contains("@@GLIBC") ||
+                                     SymName.contains("@@GCC")))
+            continue;
+
+         // If we can find the address of the symbol, we have loaded it. Skip.
+         if (skipLoadedLibs && llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(SymName))
+            continue;
+
+         std::string found = ResolveSymbol(SymName, interp, /*searchSystem*/false);
+         // The expected output is just filename without the full path, which
+         // is not very accurate, because our Dyld implementation might find
+         // a match in location a/b/c.so and if we return just c.so ROOT might
+         // resolve it to y/z/c.so and there we might not be ABI compatible.
+         // FIXME: Teach the users of GetSharedLibDeps to work with full paths.
+         if (!found.empty()) {
+            std::string cand = llvm::sys::path::filename(found).str();
+            if (!DedupSet.insert(cand).second)
+               continue;
+
+            Result += cand + ' ';
+         }
+      }
+   }
+
+   return Result;
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Get the list a libraries on which the specified lib depends. The
 /// returned string contains as first element the lib itself.
 /// Returns 0 in case the lib does not exist or does not have
-/// any dependencies.
+/// any dependencies. If useDyld is true, we iterate through all available
+/// libraries and try to construct the dependency chain by resolving each
+/// symbol.
 
-const char* TCling::GetSharedLibDeps(const char* lib)
+const char* TCling::GetSharedLibDeps(const char* lib, bool useDyld/* = false*/)
 {
+   if (useDyld) {
+      std::string libs = GetSharedLibImmediateDepsSlow(lib, fInterpreter);
+      if (!libs.empty()) {
+         fAutoLoadLibStorage.push_back(libs);
+         return fAutoLoadLibStorage.back().c_str();
+      }
+   }
+
    if (!fMapfile || !lib || !lib[0]) {
       return 0;
    }
@@ -7166,7 +7316,7 @@ int TCling::SetClassAutoloading(int autoload) const
    // If no state change is required, exit early.
    // FIXME: In future we probably want to complain if we made a request which
    // was with the same state as before in order to catch programming errors.
-   if (autoload == IsClassAutoloadingEnabled())
+   if ((bool) autoload == IsClassAutoloadingEnabled())
       return autoload;
 
    assert(fClingCallbacks && "We must have callbacks!");
@@ -7782,6 +7932,13 @@ ClassInfo_t* TCling::ClassInfo_Factory(const char* name) const
    return (ClassInfo_t*) new TClingClassInfo(fInterpreter, name);
 }
 
+ClassInfo_t* TCling::ClassInfo_Factory(DeclId_t declid) const
+{
+   R__LOCKGUARD(gInterpreterMutex);
+   return (ClassInfo_t*) new TClingClassInfo(fInterpreter, (const clang::Decl*)declid);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int TCling::ClassInfo_GetMethodNArg(ClassInfo_t* cinfo, const char* method, const char* proto, Bool_t objectIsConst /* = false */, EFunctionMatchMode mode /* = kConversionMatch */) const
@@ -7838,6 +7995,24 @@ bool TCling::ClassInfo_IsEnum(const char* name) const
 {
    return TClingClassInfo::IsEnum(fInterpreter, name);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+Bool_t TCling::ClassInfo_IsScopedEnum(ClassInfo_t *info) const
+{
+   TClingClassInfo* TClinginfo = (TClingClassInfo*) info;
+   return TClinginfo->IsScopedEnum();
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+EDataType TCling::ClassInfo_GetUnderlyingType(ClassInfo_t* info) const
+{
+   TClingClassInfo* TClinginfo = (TClingClassInfo*) info;
+   return TClinginfo->GetUnderlyingType();
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -8432,6 +8607,36 @@ Long_t TCling::FuncTempInfo_Property(FuncTempInfo_t *ft_info) const
          }
       }
    }
+   return property;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Return the property not already defined in Property
+/// See TDictionary's EFunctionProperty
+
+Long_t TCling::FuncTempInfo_ExtraProperty(FuncTempInfo_t* ft_info) const
+{
+   if (!ft_info) return 0;
+
+   long property = 0L;
+   property |= kIsCompiled;
+
+   const clang::FunctionTemplateDecl *ft = (clang::FunctionTemplateDecl*)ft_info;
+   const clang::FunctionDecl *fd = ft->getTemplatedDecl();
+
+   if (fd->isOverloadedOperator()) {
+      property |= kIsOperator;
+   }
+   else if (llvm::isa<clang::CXXConversionDecl>(fd)) {
+      property |= kIsConversion;
+   } else if (llvm::isa<clang::CXXConstructorDecl>(fd)) {
+      property |= kIsConstructor;
+   } else if (llvm::isa<clang::CXXDestructorDecl>(fd)) {
+      property |= kIsDestructor;
+   } else if (fd->isInlined()) {
+      property |= kIsInlined;
+   }
+
    return property;
 }
 

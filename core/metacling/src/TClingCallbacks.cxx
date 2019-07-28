@@ -99,8 +99,8 @@ void TClingCallbacks::InclusionDirective(clang::SourceLocation sLoc/*HashLoc*/,
                                          llvm::StringRef /*RelativePath*/,
                                          const clang::Module * Imported) {
    // We found a module. Do not try to do anything else.
+   Sema &SemaR = m_Interpreter->getSema();
    if (Imported) {
-      Sema &SemaR = m_Interpreter->getSema();
       // FIXME: We should make the module visible at that point.
       if (!SemaR.isModuleVisible(Imported))
          ROOT::TMetaUtils::Info("TClingCallbacks::InclusionDirective",
@@ -126,7 +126,6 @@ void TClingCallbacks::InclusionDirective(clang::SourceLocation sLoc/*HashLoc*/,
 
    std::string localString(FileName.str());
 
-   Sema &SemaR = m_Interpreter->getSema();
    DeclarationName Name = &SemaR.getASTContext().Idents.get(localString.c_str());
    LookupResult RHeader(SemaR, Name, sLoc, Sema::LookupOrdinaryName);
 
@@ -888,15 +887,16 @@ static void SearchAndAddPath(const std::string& Path,
          DirIt != DirEnd && !EC; DirIt.increment(EC)) {
 
       std::string FileName(DirIt->path());
-      if (!llvm::sys::fs::is_directory(FileName) && llvm::sys::path::extension(FileName) == ".so") {
-         // TCling::IsLoaded is incredibly slow!
-         // No need to check linked libraries, as this function is only invoked
-         // for symbols that cannot be found (neither by dlsym nor in the JIT).
-         if (dyLibManager->isLibraryLoaded(FileName.c_str()))
-            continue;
-         sLibraries.push_back(std::make_pair(sPaths.size(), llvm::sys::path::filename(FileName)));
-         flag = true;
-      }
+      if (llvm::sys::fs::is_directory(FileName))
+         continue;
+      if (!cling::DynamicLibraryManager::isSharedLibrary(FileName))
+         continue;
+      // No need to check linked libraries, as this function is only invoked
+      // for symbols that cannot be found (neither by dlsym nor in the JIT).
+      if (dyLibManager->isLibraryLoaded(FileName.c_str()))
+         continue;
+      sLibraries.push_back(std::make_pair(sPaths.size(), llvm::sys::path::filename(FileName)));
+      flag = true;
    }
 
    if (flag)
@@ -916,20 +916,12 @@ void TCling__FindLoadedLibraries(std::vector<std::pair<uint32_t, std::string>> &
 {
    // Store the information of path so that we don't have to iterate over the same path again and again.
    static std::unordered_set<std::string> alreadyLookedPath;
-   const clang::Preprocessor &PP = interpreter.getCI()->getPreprocessor();
-   const HeaderSearchOptions &HSOpts = PP.getHeaderSearchInfo().getHeaderSearchOpts();
    cling::DynamicLibraryManager* dyLibManager = interpreter.getDynamicLibraryManager();
 
-   if (searchSystem) {
-      llvm::SmallVector<std::string, 32> systemPath = dyLibManager->getSystemSearchPath();
-      for (const std::string& sysPath : systemPath) {
-         SearchAndAddPath(sysPath, sLibraries, sPaths, alreadyLookedPath, dyLibManager);
-      }
-   } else {
-      const std::vector<std::string>& MPaths = HSOpts.PrebuiltModulePaths;
-      // Take path here eg. "/home/foo/module-release/lib/"
-      for (const std::string& mPath : MPaths) {
-         SearchAndAddPath(mPath, sLibraries, sPaths, alreadyLookedPath, dyLibManager);
-      }
+   const auto &searchPaths = dyLibManager->getSearchPath();
+   for (const cling::DynamicLibraryManager::SearchPathInfo &Info : searchPaths) {
+      if (!Info.IsUser && !searchSystem)
+         continue;
+      SearchAndAddPath(Info.Path, sLibraries, sPaths, alreadyLookedPath, dyLibManager);
    }
 }

@@ -1,3 +1,9 @@
+# Copyright (C) 1995-2019, Rene Brun and Fons Rademakers.
+# All rights reserved.
+#
+# For the licensing terms see $ROOTSYS/LICENSE.
+# For the list of contributors see $ROOTSYS/README/CREDITS.
+
 ############################################################################
 # CMakeLists.txt file for building ROOT ntuple package
 # @author Jakob Blomer CERN
@@ -21,6 +27,7 @@ HEADERS
   ROOT/RNTupleUtil.hxx
   ROOT/RNTupleView.hxx
   ROOT/RPage.hxx
+  ROOT/RPageAllocator.hxx
   ROOT/RPagePool.hxx
   ROOT/RPageStorage.hxx
   ROOT/RPageStorageRoot.hxx
@@ -32,6 +39,7 @@ SOURCES
   v7/src/RNTupleDescriptor.cxx
   v7/src/RNTupleModel.cxx
   v7/src/RPage.cxx
+  v7/src/RPageAllocator.cxx
   v7/src/RPagePool.cxx
   v7/src/RPageStorage.cxx
   v7/src/RPageStorageRoot.cxx
@@ -43,4 +51,3 @@ DEPENDENCIES
 )
 
 ROOT_ADD_TEST_SUBDIRECTORY(v7/test)
-

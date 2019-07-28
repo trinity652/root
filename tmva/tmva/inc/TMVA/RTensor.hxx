@@ -8,6 +8,7 @@
 #include <memory>      // std::shared_ptr
 #include <type_traits> // std::is_convertible
 #include <algorithm>   // std::reverse
+#include <iterator>    // std::random_access_iterator_tag
 
 namespace TMVA {
 namespace Experimental {
@@ -24,7 +25,7 @@ namespace Internal {
 /// \param[in] shape Shape vector
 /// \return Size of contiguous memory
 template <typename T>
-std::size_t GetSizeFromShape(const T &shape)
+inline std::size_t GetSizeFromShape(const T &shape)
 {
    if (shape.size() == 0)
       return 0;
@@ -43,7 +44,7 @@ std::size_t GetSizeFromShape(const T &shape)
 /// https://en.wikipedia.org/wiki/Row-_and_column-major_order
 /// https://docs.scipy.org/doc/numpy/reference/generated/numpy.ndarray.strides.html
 template <typename T>
-std::vector<std::size_t> ComputeStridesFromShape(const T &shape, MemoryLayout layout)
+inline std::vector<std::size_t> ComputeStridesFromShape(const T &shape, MemoryLayout layout)
 {
    const auto size = shape.size();
    T strides(size);
@@ -71,6 +72,40 @@ std::vector<std::size_t> ComputeStridesFromShape(const T &shape, MemoryLayout la
    return strides;
 }
 
+/// \brief Compute indices from global index
+/// \param[in] Shape vector
+/// \param[in] idx Global index
+/// \param[in] layout Memory layout
+/// \return Indice vector
+template <typename T>
+inline T ComputeIndicesFromGlobalIndex(const T& shape, MemoryLayout layout, const typename T::value_type idx)
+{
+    const auto size = shape.size();
+    auto strides = ComputeStridesFromShape(shape, layout);
+    T indices(size);
+    auto r = idx;
+    for (std::size_t i = 0; i < size; i++) {
+        indices[i] = int(r / strides[i]);
+        r = r % strides[i];
+    }
+    return indices;
+}
+
+/// \brief Compute global index from indices
+/// \param[in] strides Strides vector
+/// \param[in] idx Indice vector
+/// \return Global index
+template <typename U, typename V>
+inline std::size_t ComputeGlobalIndex(const U& strides, const V& idx)
+{
+   std::size_t globalIndex = 0;
+   const auto size = idx.size();
+   for (std::size_t i = 0; i < size; i++) {
+      globalIndex += strides[size - 1 - i] * idx[size - 1 - i];
+   }
+   return globalIndex;
+}
+
 /// \brief Type checking for all types of a parameter pack, e.g., used in combination with std::is_convertible
 template <class... Ts>
 struct and_types : std::true_type {
@@ -79,6 +114,36 @@ struct and_types : std::true_type {
 template <class T0, class... Ts>
 struct and_types<T0, Ts...> : std::integral_constant<bool, T0{} && and_types<Ts...>{}> {
 };
+
+/// \brief Copy slice of a tensor recursively from here to there
+/// \param[in] here Source tensor
+/// \param[in] there Target tensor (slice of source tensor)
+/// \param[in] mins Minimum of indices for each dimension
+/// \param[in] maxs Maximum of indices for each dimension
+/// \param[in] idx Current indices
+/// \param[in] active Active index needed to stop the recursion
+///
+/// Copy the content of a slice of a tensor from source to target. This is done
+/// by recursively iterating over the ranges of the slice for each dimension.
+template <typename T>
+void RecursiveCopy(T &here, T &there,
+                   const std::vector<std::size_t> &mins, const std::vector<std::size_t> &maxs,
+                   std::vector<std::size_t> idx, std::size_t active)
+{
+   const auto size = idx.size();
+   for (std::size_t i = mins[active]; i < maxs[active]; i++) {
+      idx[active] = i;
+      if (active == size - 1) {
+         auto idxThere = idx;
+         for (std::size_t j = 0; j < size; j++) {
+            idxThere[j] -= mins[j];
+         }
+         there(idxThere) = here(idx);
+      } else {
+         Internal::RecursiveCopy(here, there, mins, maxs, idx, active + 1);
+      }
+   }
+}
 
 } // namespace TMVA::Experimental::Internal
 
@@ -125,6 +190,17 @@ public:
       fStrides = Internal::ComputeStridesFromShape(shape, layout);
    }
 
+   /// \brief Construct a tensor as view on data
+   /// \param[in] data Pointer to data contiguous in memory
+   /// \param[in] shape Shape vector
+   /// \param[in] strides Strides vector
+   /// \param[in] layout Memory layout
+   RTensor(Value_t *data, Shape_t shape, Shape_t strides, MemoryLayout layout = MemoryLayout::RowMajor)
+      : fShape(shape), fStrides(strides), fLayout(layout), fData(data), fContainer(NULL)
+   {
+      fSize = Internal::GetSizeFromShape(shape);
+   }
+
    /// \brief Construct a tensor owning externally provided data
    /// \param[in] container Shared pointer to data container
    /// \param[in] shape Shape vector
@@ -154,17 +230,24 @@ public:
 
    // Access elements
    Value_t &operator()(const Index_t &idx);
+   const Value_t &operator() (const Index_t &idx) const;
    template <typename... Idx> Value_t &operator()(Idx... idx);
+   template <typename... Idx> const Value_t &operator() (Idx... idx) const;
 
    // Access properties
-   std::size_t GetSize() { return fSize; }
-   Shape_t GetShape() { return fShape; }
-   Shape_t GetStrides() { return fStrides; }
+   std::size_t GetSize() const { return fSize; }
+   Shape_t GetShape() const { return fShape; }
+   Shape_t GetStrides() const { return fStrides; }
    Value_t *GetData() { return fData; }
+   const Value_t *GetData() const { return fData; }
    std::shared_ptr<Container_t> GetContainer() { return fContainer; }
-   MemoryLayout GetMemoryLayout() { return fLayout; }
-   bool IsView() { return fContainer == NULL; }
-   bool IsOwner() { return !IsView(); }
+   const std::shared_ptr<Container_t> GetContainer() const { return fContainer; }
+   MemoryLayout GetMemoryLayout() const { return fLayout; }
+   bool IsView() const { return fContainer == NULL; }
+   bool IsOwner() const { return !IsView(); }
+
+   // Copy
+   RTensor<Value_t, Container_t> Copy(MemoryLayout layout = MemoryLayout::RowMajor);
 
    // Transformations
    RTensor<Value_t, Container_t> Transpose();
@@ -172,6 +255,51 @@ public:
    RTensor<Value_t, Container_t> ExpandDims(int idx);
    RTensor<Value_t, Container_t> Reshape(const Shape_t &shape);
    RTensor<Value_t, Container_t> Slice(const Slice_t &slice);
+
+   // Iterator class
+   class Iterator : public std::iterator<std::random_access_iterator_tag, Value_t> {
+   private:
+      RTensor<Value_t, Container_t>& fTensor;
+      Index_t::value_type fGlobalIndex;
+   public:
+      using difference_type = typename std::iterator<std::random_access_iterator_tag, Value_t>::difference_type;
+
+      Iterator(RTensor<Value_t, Container_t>& x, typename Index_t::value_type idx) : fTensor(x), fGlobalIndex(idx) {}
+      Iterator& operator++() { fGlobalIndex++; return *this; }
+      Iterator operator++(int) { auto tmp = *this; operator++(); return tmp; }
+      Iterator& operator--() { fGlobalIndex--; return *this; }
+      Iterator operator--(int) { auto tmp = *this; operator--(); return tmp; }
+      Iterator operator+(difference_type rhs) const { return Iterator(fTensor, fGlobalIndex + rhs); }
+      Iterator operator-(difference_type rhs) const { return Iterator(fTensor, fGlobalIndex - rhs); }
+      difference_type operator-(const Iterator& rhs) { return fGlobalIndex - rhs.GetGlobalIndex(); }
+      Iterator& operator+=(difference_type rhs) { fGlobalIndex += rhs; return *this; }
+      Iterator& operator-=(difference_type rhs) { fGlobalIndex -= rhs; return *this; }
+      Value_t& operator*()
+      {
+         auto idx = Internal::ComputeIndicesFromGlobalIndex(fTensor.GetShape(), fTensor.GetMemoryLayout(), fGlobalIndex);
+         return fTensor(idx);
+      }
+      bool operator==(const Iterator& rhs) const
+      {
+         if (fGlobalIndex == rhs.GetGlobalIndex()) return true;
+         return false;
+      }
+      bool operator!=(const Iterator& rhs) const { return !operator==(rhs); };
+      bool operator>(const Iterator& rhs) const { return fGlobalIndex > rhs.GetGlobalIndex(); }
+      bool operator<(const Iterator& rhs) const { return fGlobalIndex < rhs.GetGlobalIndex(); }
+      bool operator>=(const Iterator& rhs) const { return fGlobalIndex >= rhs.GetGlobalIndex(); }
+      bool operator<=(const Iterator& rhs) const { return fGlobalIndex <= rhs.GetGlobalIndex(); }
+      typename Index_t::value_type GetGlobalIndex() const { return fGlobalIndex; };
+   };
+
+   // Iterator interface
+   // TODO: Document that the iterator always iterates following the physical memory layout.
+   Iterator begin() noexcept {
+      return Iterator(*this, 0);
+   }
+   Iterator end() noexcept {
+      return Iterator(*this, fSize);
+   }
 };
 
 /// \brief Access elements
@@ -180,12 +308,18 @@ public:
 template <typename Value_t, typename Container_t>
 inline Value_t &RTensor<Value_t, Container_t>::operator()(const Index_t &idx)
 {
-   std::size_t globalIndex = 0;
-   const auto size = idx.size();
-   for (std::size_t i = 0; i < size; i++) {
-      globalIndex += fStrides[size - 1 - i] * idx[size - 1 - i];
-   }
-   return *(fData + globalIndex);
+   const auto globalIndex = Internal::ComputeGlobalIndex(fStrides, idx);
+   return fData[globalIndex];
+}
+
+/// \brief Access elements
+/// \param[in] idx Index vector
+/// \return Reference to element
+template <typename Value_t, typename Container_t>
+inline const Value_t &RTensor<Value_t, Container_t>::operator() (const Index_t &idx) const
+{
+   const auto globalIndex = Internal::ComputeGlobalIndex(fStrides, idx);
+   return fData[globalIndex];
 }
 
 /// \brief Access elements
@@ -197,7 +331,19 @@ Value_t &RTensor<Value_t, Container_t>::operator()(Idx... idx)
 {
    static_assert(Internal::and_types<std::is_convertible<Idx, std::size_t>...>{},
                  "Indices are not convertible to std::size_t.");
-   return this->operator()({static_cast<std::size_t>(idx)...});
+   return operator()({static_cast<std::size_t>(idx)...});
+}
+
+/// \brief Access elements
+/// \param[in] idx Indices
+/// \return Reference to element
+template <typename Value_t, typename Container_t>
+template <typename... Idx>
+const Value_t &RTensor<Value_t, Container_t>::operator() (Idx... idx) const
+{
+   static_assert(Internal::and_types<std::is_convertible<Idx, std::size_t>...>{},
+                 "Indices are not convertible to std::size_t.");
+   return operator()({static_cast<std::size_t>(idx)...});
 }
 
 /// \brief Transpose
@@ -362,7 +508,7 @@ inline RTensor<Value_t, Container_t> RTensor<Value_t, Container_t>::Slice(const 
    for (std::size_t i = 0; i < sliceSize; i++) {
       idx[i] = slice[i][0];
    }
-   data = &this->operator()(idx);
+   data = &operator()(idx);
 
    // Create copy and modify properties
    RTensor<Value_t, Container_t> x(*this);
@@ -372,6 +518,27 @@ inline RTensor<Value_t, Container_t> RTensor<Value_t, Container_t>::Slice(const 
 
    // Squeeze tensor and return
    return x.Squeeze();
+}
+
+/// Copy RTensor to new object
+/// \param[in] layout Memory layout of the new RTensor
+/// \returns New RTensor
+/// The operation copies all elements of the current RTensor to a new RTensor
+/// with the given layout contiguous in memory. Note that this copies by default
+/// to a row major memory layout.
+template <typename Value_t, typename Container_t>
+inline RTensor<Value_t, Container_t> RTensor<Value_t, Container_t>::Copy(MemoryLayout layout)
+{
+   // Create new tensor with zeros owning the memory
+   RTensor<Value_t, Container_t> r(fShape, layout);
+
+   // Copy over the elements from this tensor
+   const auto mins = Shape_t(fShape.size());
+   const auto maxs = fShape;
+   auto idx = mins;
+   Internal::RecursiveCopy(*this, r, mins, maxs, idx, 0);
+
+   return r;
 }
 
 /// \brief Pretty printing

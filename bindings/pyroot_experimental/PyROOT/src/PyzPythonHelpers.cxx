@@ -53,14 +53,15 @@ PyObject *PyROOT::GetSizeOfType(PyObject * /*self*/, PyObject *args)
 }
 
 ////////////////////////////////////////////////////////////////////////////
-/// \brief Get pointer to the data of a vector
+/// \brief Get pointer to the data of an object
 /// \param[in] self Always null, since this is a module function.
-/// \param[in] args[0] Data-type of the C++ object as Python string
-/// \param[in] args[1] Python representation of the C++ object.
+/// \param[in] args[0] Python representation of the C++ object.
+/// \param[in] args[1] Data-type of the C++ object as Python string
+/// \param[in] args[2] Method to be called on the C++ object to get the data pointer as Python string
 ///
-/// This function returns the pointer to the data of a vector as an Python
-/// integer.
-PyObject *PyROOT::GetVectorDataPointer(PyObject * /*self*/, PyObject *args)
+/// This function returns the pointer to the data of an object as an Python
+/// integer retrieved by the given method.
+PyObject *PyROOT::GetDataPointer(PyObject * /*self*/, PyObject *args)
 {
    // Get pointer of C++ object
    PyObject *pyobj = PyTuple_GetItem(args, 0);
@@ -71,11 +72,15 @@ PyObject *PyROOT::GetVectorDataPointer(PyObject * /*self*/, PyObject *args)
    PyObject *pycppname = PyTuple_GetItem(args, 1);
    std::string cppname = CPyCppyy_PyUnicode_AsString(pycppname);
 
-   // Call interpreter to get pointer to data (using `data` method)
+   // Get name of method to be called to get the data pointer
+   PyObject *pymethodname = PyTuple_GetItem(args, 2);
+   std::string methodname = CPyCppyy_PyUnicode_AsString(pymethodname);
+
+   // Call interpreter to get pointer to data
    unsigned long long pointer = 0;
    std::stringstream code;
-   code << "*((long*)" << &pointer << ") = reinterpret_cast<long>(reinterpret_cast<" << cppname << "*>(" << cppobj
-        << ")->data())";
+   code << "*((long*)" << &pointer << ") = reinterpret_cast<long>(reinterpret_cast<"
+        << cppname << "*>(" << cppobj << ")->" << methodname << "())";
    gInterpreter->Calc(code.str().c_str());
 
    // Return pointer as integer

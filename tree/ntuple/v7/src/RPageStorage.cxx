@@ -19,7 +19,7 @@
 
 #include <ROOT/RStringView.hxx>
 
-ROOT::Experimental::Detail::RPageStorage::RPageStorage()
+ROOT::Experimental::Detail::RPageStorage::RPageStorage(std::string_view name) : fNTupleName(name)
 {
 }
 
@@ -27,7 +27,7 @@ ROOT::Experimental::Detail::RPageStorage::~RPageStorage()
 {
 }
 
-ROOT::Experimental::Detail::RPageSource::RPageSource(std::string_view /*treeName*/)
+ROOT::Experimental::Detail::RPageSource::RPageSource(std::string_view name) : RPageStorage(name)
 {
 }
 
@@ -35,7 +35,7 @@ ROOT::Experimental::Detail::RPageSource::~RPageSource()
 {
 }
 
-ROOT::Experimental::Detail::RPageSink::RPageSink(std::string_view /*treeName*/)
+ROOT::Experimental::Detail::RPageSink::RPageSink(std::string_view name) : RPageStorage(name)
 {
 }
 
